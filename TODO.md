@@ -59,8 +59,8 @@
 ## M2-B2-B — Parameter merge / Position sizing
 
 - [ ] instrument별 parameter 병합 우선순위를 구현하고 검증 실패를 테스트한다.
-- [ ] 목표 비중을 OrderIntent 수량으로 변환하고 Decimal 반올림을 테스트한다.
-- [ ] BTC와 ETF profile에 같은 Strategy를 적용하고 서로 다른 결과를 테스트한다.
+- [x] 목표 비중을 OrderIntent 수량으로 변환하고 Decimal 내림을 테스트한다.
+- [x] BTC와 ETF profile에 같은 Strategy와 sizing 로직을 적용하고 서로 다른 수량을 테스트한다.
 
 ## M2-C — Risk Manager
 

@@ -413,6 +413,56 @@ Order
 
 `OrderIntent`에는 Instrument, UTC timestamp, strategy ID, BUY/SELL 방향, quantity가 있다. Broker 주문 ID, 체결 상태, 수수료, 가격 같은 실행 정보는 아직 없다. 따라서 OrderIntent가 생겨도 거래소에는 아무 요청도 전달되지 않는다.
 
+### Position sizing
+
+Position sizing은 Signal과 목표 비중 설정을 실제 주문 후보 수량으로 바꾸는 계산이다. Strategy 안에서 계산하지 않으며, 현재는 Portfolio class 대신 필요한 값을 함수에 직접 전달한다.
+
+```text
+포트폴리오 가치 10,000,000원
+  ↓
+BTC 목표 비중 10%
+  ↓
+목표 가치 1,000,000원
+  ↓
+BTC 가격 100,000,000원
+  ↓
+목표 수량 0.01 BTC
+  ↓
+현재 0.004 BTC 보유
+  ↓
+BUY 0.006 BTC OrderIntent
+```
+
+계산식은 다음과 같다.
+
+```text
+target_value = portfolio_value × target_weight
+target_quantity = target_value ÷ current_price
+difference = target_quantity - current_quantity
+```
+
+차이가 양수면 BUY, 음수면 절대값 수량의 SELL Intent가 된다. 차이가 0이거나 주문 가능 단위로 내림한 결과가 0이면 Intent를 만들지 않는다. 현재는 long-only이므로 목표 비중은 0부터 1까지만 허용한다.
+
+`quantity_step`은 주문 수량 단위다. 예를 들어 `Decimal("0.00000001")`이면 계산된 차이를 이 단위 이하로 보수적으로 내림한다. 아직 거래소별 lot-size framework는 없으며 호출하는 쪽에서 step을 명시한다.
+
+```text
+Bar
+  ↓
+Indicator
+  ↓
+Strategy
+  ↓
+Signal
+  ↓
+Position sizing
+  ↓
+OrderIntent
+  ↓
+Risk Manager  (아직 미구현)
+  ↓
+Order         (아직 미구현)
+```
+
 ### 금융 값에 Decimal을 사용하는 이유
 
 Python의 `float`는 0.1 같은 십진수를 내부에서 정확히 표현하지 못해 작은 오차가 생길 수 있다. 가격, 수량, 금액 계산에서는 이런 오차가 쌓일 수 있으므로 이 프로젝트는 문자열로 만든 `Decimal`, 예를 들어 `Decimal("0.01")`을 사용한다. `OrderIntent.quantity`에 `0.01` 같은 float를 넣으면 명확하게 거부한다.
@@ -523,6 +573,7 @@ python -m pytest -q
 | `test_strategy_reuse.py` | 같은 Strategy의 KRW-BTC/KRW-ETH 및 서로 다른 parameter 재사용 |
 | `test_strategy_profile.py` | BTC/ETH Profile, Strategy 생성, fast/slow parameter 검증 |
 | `test_order_intent.py` | BUY/SELL Intent, Decimal·UTC 검증과 JSON round-trip |
+| `test_position_sizing.py` | 목표 비중 수량, BUY/SELL, 내림, 입력 검증, BTC/ETF 재사용 |
 | `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
@@ -733,7 +784,7 @@ tests/
 | M2-A | Strategy, Signal, 20/60 MA crossover | 완료 |
 | M2-B1 | Instrument별 Strategy Profile | 완료 |
 | M2-B2-A | OrderIntent와 Decimal 기초 | 완료 |
-| M2-B2-B | Parameter 병합과 position sizing | **아직 구현되지 않음** |
+| M2-B2-B | Position sizing과 BTC/ETF 재사용 | 부분 완료 |
 | M2-C | Risk Manager | **아직 구현되지 않음** |
 | M3 | Backtest | **아직 구현되지 않음** |
 
