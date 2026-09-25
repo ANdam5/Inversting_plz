@@ -44,7 +44,14 @@
 - [x] closed Bar만 조회해 20/60 Strategy Signal을 출력하는 read-only CLI를 구현하고 테스트한다.
 - [x] 동일 Strategy의 다중 Instrument 및 parameter 재사용성을 테스트한다.
 
-## M2-B — OrderIntent / Parameter / Position sizing
+## M2-B1 — Instrument Strategy Profile
+
+- [x] Instrument, strategy ID, 검증된 MA parameter를 묶는 immutable Profile을 정의한다.
+- [x] Profile 생성 시 fast/slow window 규칙을 검증한다.
+- [x] Profile에서 현재 MA Crossover Strategy를 생성하는 최소 경로를 구현한다.
+- [x] KRW-BTC와 KRW-ETH Profile이 같은 Strategy에 다른 parameter를 전달하는지 테스트한다.
+
+## M2-B2 — OrderIntent / Position sizing
 
 - [ ] `OrderIntent` 최소 모델을 정의하고 serialization round-trip을 테스트한다.
 - [ ] 가격·수량·금액의 Decimal 정책을 정의하고 float 입력 거부를 테스트한다.

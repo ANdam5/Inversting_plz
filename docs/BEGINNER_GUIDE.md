@@ -339,6 +339,7 @@ Signal은 Strategy의 판단 결과이며 실제 주문이 아니다. 현재 Sig
 - **Strategy**는 어떤 규칙으로 판단할지 나타낸다. 현재 구현된 것은 `MovingAverageCrossoverStrategy` 하나뿐이다.
 - **Parameter**는 같은 Strategy를 어떤 설정으로 사용할지 나타낸다. 여기서는 `fast_window`와 `slow_window`다.
 - **Risk**는 Signal이 생겼을 때 실제로 얼마를 투자할지 정하는 영역이며 아직 구현되지 않았다.
+- **Profile**은 특정 Instrument에 어떤 Strategy와 Parameter를 사용할지 한데 묶은 설정이다.
 
 따라서 Strategy 내부에서 종목 이름을 보고 규칙을 바꾸지 않는다. 사용자가 같은 Strategy class에 서로 다른 Instrument의 Bar와 서로 다른 parameter를 전달한다.
 
@@ -351,6 +352,38 @@ KRW-XRP → BreakoutStrategy
 ```
 
 마지막 예시의 `BreakoutStrategy`는 구조를 설명하기 위한 미래 예시일 뿐 현재 코드에는 구현되어 있지 않다. YAML, Strategy registry, 종목별 profile loader도 아직 없다.
+
+### Strategy Profile
+
+지금은 `StrategyProfile`이라는 작은 immutable(만든 뒤 값을 바꾸지 않는) 설정 모델이 있다. Profile은 종목별 조건문을 Strategy 안에 넣는 대신, 종목과 Strategy 설정을 바깥에서 연결한다.
+
+```text
+KRW-BTC
+└─ Profile
+   ├─ Strategy = moving_average_crossover
+   ├─ Fast = 20
+   └─ Slow = 60
+
+KRW-ETH
+└─ Profile
+   ├─ Strategy = moving_average_crossover
+   ├─ Fast = 15
+   └─ Slow = 50
+```
+
+`MovingAverageCrossoverParameters`는 fast와 slow가 양수인지, fast가 slow보다 작은지 Profile 생성 시 검사한다. `create_strategy_from_profile()`은 이 값을 `MovingAverageCrossoverStrategy`에 전달한다.
+
+```text
+Instrument + strategy_id + parameters
+                ↓
+         StrategyProfile
+                ↓
+ create_strategy_from_profile()
+                ↓
+ MovingAverageCrossoverStrategy
+```
+
+현재 Profile 값은 구조를 보여 주는 예제이며 “투자에 가장 좋은 설정”이라는 뜻이 아니다. 좋은 Strategy와 parameter인지는 향후 Backtest로 평가해야 한다. 현재는 MA Crossover Strategy 하나만 지원하며 YAML, JSON, DB 설정, registry, 상속 체계는 없다.
 
 | 개념 | 의미 | 현재 상태 |
 |---|---|---|
@@ -462,6 +495,7 @@ python -m pytest -q
 | `test_moving_average.py` | SMA 정상 계산, 정확한 길이, 부족한 데이터, 잘못된 window |
 | `test_moving_average_strategy.py` | bullish/bearish 교차, neutral, 최소 Bar 수와 window 검증 |
 | `test_strategy_reuse.py` | 같은 Strategy의 KRW-BTC/KRW-ETH 및 서로 다른 parameter 재사용 |
+| `test_strategy_profile.py` | BTC/ETH Profile, Strategy 생성, fast/slow parameter 검증 |
 | `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
@@ -670,7 +704,8 @@ tests/
 | M1 | Upbit 일봉 수집, pagination, 검증, SQLite, CLI | 완료 |
 | M1.5 | closed candle, historical dataset, summary | 완료 |
 | M2-A | Strategy, Signal, 20/60 MA crossover | 완료 |
-| M2-B | OrderIntent, parameter, position sizing | **아직 구현되지 않음** |
+| M2-B1 | Instrument별 Strategy Profile | 완료 |
+| M2-B2 | OrderIntent와 position sizing | **아직 구현되지 않음** |
 | M2-C | Risk Manager | **아직 구현되지 않음** |
 | M3 | Backtest | **아직 구현되지 않음** |
 

@@ -6,14 +6,21 @@ from investing_plz.strategy.moving_average_crossover import (
     MovingAverageCrossoverStrategy,
 )
 from investing_plz.strategy.protocol import Strategy
+from investing_plz.strategy.profile import (
+    MovingAverageCrossoverParameters,
+    StrategyProfile,
+    create_strategy_from_profile,
+)
 from investing_plz.strategy.signal import Signal, SignalType
 
 __all__ = [
     "InsufficientDataError",
     "MovingAverageCrossoverEvaluation",
     "MovingAverageCrossoverStrategy",
+    "MovingAverageCrossoverParameters",
     "Signal",
     "SignalType",
     "Strategy",
+    "StrategyProfile",
+    "create_strategy_from_profile",
 ]
-
