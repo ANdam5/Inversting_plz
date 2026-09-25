@@ -113,7 +113,7 @@
 ## M3-B4 — Portfolio Accounting / Trade Metrics
 
 - [x] 평균단가와 실현 손익 계산을 구현하고 부분 매도를 테스트한다.
-- [ ] 미실현 손익 평가를 구현하고 quote currency 일관성을 테스트한다.
+- [x] 미실현 손익 평가를 구현하고 quote currency 일관성을 테스트한다.
 - [ ] 거래별 성과 지표를 고정 원장으로 테스트한다.
 
 ## M3-C — Backtest Metadata / Reproducibility

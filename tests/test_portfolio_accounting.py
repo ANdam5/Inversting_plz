@@ -114,3 +114,77 @@ def test_accounting_keeps_existing_oversell_protection() -> None:
 
     with pytest.raises(ValueError, match="exceeds the current position"):
         portfolio.apply(fill(OrderSide.SELL, "2", "100"))
+
+
+def test_zero_position_has_zero_unrealized_pnl() -> None:
+    portfolio = BacktestPortfolio(cash=Decimal("1000"))
+
+    assert portfolio.unrealized_pnl_at(Decimal("120")) == Decimal("0")
+
+
+@pytest.mark.parametrize(
+    ("current_price", "expected"),
+    [
+        (Decimal("120"), Decimal("40")),
+        (Decimal("80"), Decimal("-40")),
+        (Decimal("100"), Decimal("0")),
+    ],
+)
+def test_unrealized_pnl_uses_current_price_and_average_cost(
+    current_price: Decimal,
+    expected: Decimal,
+) -> None:
+    portfolio = BacktestPortfolio(
+        cash=Decimal("0"),
+        position_quantity=Decimal("2"),
+        average_cost=Decimal("100"),
+    )
+
+    assert portfolio.unrealized_pnl_at(current_price) == expected
+
+
+def test_buy_fee_is_not_deducted_again_from_unrealized_pnl() -> None:
+    portfolio = BacktestPortfolio(cash=Decimal("1000"))
+    portfolio = portfolio.apply(fill(OrderSide.BUY, "2", "100", fee="10"))
+
+    assert portfolio.average_cost == Decimal("105")
+    assert portfolio.unrealized_pnl_at(Decimal("110")) == Decimal("10")
+
+
+def test_partial_sell_uses_remaining_quantity_without_changing_accounting() -> None:
+    portfolio = BacktestPortfolio(cash=Decimal("1000"))
+    portfolio = portfolio.apply(fill(OrderSide.BUY, "2", "100"))
+    portfolio = portfolio.apply(fill(OrderSide.SELL, "0.5", "120"))
+    state_before_evaluation = portfolio
+
+    assert portfolio.unrealized_pnl_at(Decimal("110")) == Decimal("15.0")
+    assert portfolio == state_before_evaluation
+    assert portfolio.realized_pnl == Decimal("10.0")
+
+
+def test_full_sell_has_zero_unrealized_pnl() -> None:
+    portfolio = BacktestPortfolio(cash=Decimal("1000"))
+    portfolio = portfolio.apply(fill(OrderSide.BUY, "1", "100"))
+    portfolio = portfolio.apply(fill(OrderSide.SELL, "1", "120"))
+
+    assert portfolio.unrealized_pnl_at(Decimal("150")) == Decimal("0")
+    assert portfolio.realized_pnl == Decimal("20")
+
+
+def test_unrealized_pnl_requires_decimal_price() -> None:
+    portfolio = BacktestPortfolio(cash=Decimal("1000"))
+
+    with pytest.raises(TypeError, match="Decimal"):
+        portfolio.unrealized_pnl_at(120.0)  # type: ignore[arg-type]
+
+
+def test_realized_plus_unrealized_reconciles_to_portfolio_gain() -> None:
+    initial_cash = Decimal("1000")
+    current_price = Decimal("110")
+    portfolio = BacktestPortfolio(cash=initial_cash)
+    portfolio = portfolio.apply(fill(OrderSide.BUY, "2", "100", fee="10"))
+    portfolio = portfolio.apply(fill(OrderSide.SELL, "0.5", "120", fee="1"))
+
+    total_pnl = portfolio.realized_pnl + portfolio.unrealized_pnl_at(current_price)
+
+    assert initial_cash + total_pnl == portfolio.value_at(current_price)

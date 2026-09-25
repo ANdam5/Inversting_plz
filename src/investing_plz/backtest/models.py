@@ -71,6 +71,14 @@ class BacktestPortfolio:
             raise ValueError("price must be greater than zero")
         return self.cash + self.position_quantity * price
 
+    def unrealized_pnl_at(self, current_price: Decimal) -> Decimal:
+        current_price = require_decimal(current_price, name="current_price")
+        if current_price <= 0:
+            raise ValueError("current_price must be greater than zero")
+        if self.position_quantity == 0:
+            return Decimal("0")
+        return self.position_quantity * (current_price - self.average_cost)
+
     def apply(self, fill: Fill) -> "BacktestPortfolio":
         amount = fill.quantity * fill.fill_price
         if fill.side is OrderSide.BUY:
