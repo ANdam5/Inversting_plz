@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument(
         "--min-trade-amount", type=Decimal, default=Decimal("0")
     )
+    backtest.add_argument("--fee-rate", type=Decimal, default=Decimal("0"))
+    backtest.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
     backtest.add_argument(
         "--show-fills",
         action="store_true",
@@ -146,6 +148,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 target_weight=args.target_weight,
                 quantity_step=args.quantity_step,
                 min_trade_amount=args.min_trade_amount,
+                fee_rate=args.fee_rate,
+                slippage_bps=args.slippage_bps,
                 risk_limits=RiskLimits(
                     max_order_amount=args.max_order_amount,
                     max_instrument_weight=args.max_instrument_weight,
@@ -174,8 +178,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "final_position_quantity": result.final_position_quantity,
             "final_position_market_value": result.final_position_market_value,
             "final_portfolio_value": result.final_portfolio_value,
-            "fee": 0,
-            "slippage": 0,
+            "fee_rate": args.fee_rate,
+            "slippage_bps": args.slippage_bps,
+            "total_fees": result.total_fees,
         }
         for key, value in output.items():
             print(f"{key}={value}")
@@ -187,6 +192,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     f"{sequence}. timestamp={fill.timestamp.isoformat()} "
                     f"side={fill.side.value.upper()} quantity={fill.quantity} "
                     f"fill_price={fill.fill_price} amount={amount} "
+                    f"fee={fill.fee_amount} "
                     f"strategy_id={fill.strategy_id}"
                 )
         return 0

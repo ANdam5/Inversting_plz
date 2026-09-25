@@ -622,6 +622,10 @@ Bullish target adjustment는 사고 싶은 방향으로 목표에 접근하는 �
 
 `min_trade_amount`는 목표와의 차이가 너무 작을 때 의미 없는 소액 BUY를 만들지 않기 위한 Backtest 운영 기준이다. 예를 들어 남은 BUY 필요 금액이 3원이고 최소 주문 기준이 10,000원이면 추가 주문 없이 진입을 끝낸다. 이는 Upbit의 공식 최소 주문 금액이나 추천 설정이 아니다. Bearish 청산 SELL은 작은 잔여 포지션을 영구히 남기지 않도록 이 기준보다 작아도 전량 청산한다.
 
+**Fee**는 거래가 체결될 때 거래대금과 별도로 빠지는 수수료다. **Slippage**는 Bar의 open 같은 기준 시장가격보다 불리한 가격에 체결된다고 가정하는 비용이다. 예를 들어 open이 100,000,000원이고 slippage가 5 bps라면 BUY는 100,050,000원, SELL은 99,950,000원에 체결된다. `fee_rate=0.0005`이면 체결 거래대금의 0.05%를 fee로 반영한다.
+
+이 비용 값은 실제 시장 비용을 자동으로 조회하거나 추정한 결과가 아니다. 사용자가 Backtest 가정으로 직접 지정하는 값이다.
+
 현재 가상 Portfolio는 `cash`와 `position_quantity`만 가진다. BUY Fill은 현금을 줄이고 수량을 늘리며, SELL Fill은 반대로 처리한다. 보유량보다 많이 팔 수 없다. 종료 시에는 `cash + position_quantity × latest_close`로 최종 가치를 계산한다.
 
 ```powershell
@@ -636,12 +640,14 @@ python -m investing_plz backtest `
   --target-weight 0.10 `
   --quantity-step 0.00000001 `
   --min-trade-amount 10000 `
+  --fee-rate 0.0005 `
+  --slippage-bps 5 `
   --max-order-amount 500000 `
   --max-instrument-weight 0.20 `
   --min-cash-reserve 1000000
 ```
 
-이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. 현재 baseline은 `fee=0`, `slippage=0`이며 평균단가, 실현손익, MDD 같은 성과 지표도 없으므로 결과만 보고 Strategy가 좋다고 판단하면 안 된다.
+이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. `fee_rate`와 `slippage_bps`의 기본값은 0이며, 평균단가, 실현손익, MDD 같은 성과 지표는 아직 없으므로 결과만 보고 Strategy가 좋다고 판단하면 안 된다.
 
 가상 체결 내역도 확인하려면 같은 명령 끝에 `--show-fills`를 붙인다.
 
@@ -654,7 +660,7 @@ python -m investing_plz backtest `
   --show-fills
 ```
 
-`--show-fills`는 Backtest 계산을 바꾸지 않고, 이미 계산된 Fill의 시간, BUY/SELL 방향, 수량, 체결 가격과 금액을 요약 아래에 추가로 보여 주는 선택 옵션이다.
+`--show-fills`는 Backtest 계산을 바꾸지 않고, 이미 계산된 Fill의 시간, BUY/SELL 방향, 수량, 체결 가격, 거래대금과 fee를 요약 아래에 추가로 보여 주는 선택 옵션이다.
 
 ## 10. pytest란 무엇인가
 

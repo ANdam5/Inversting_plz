@@ -2,7 +2,9 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-from investing_plz.cli import main
+import pytest
+
+from investing_plz.cli import build_parser, main
 from investing_plz.domain import Bar, Instrument
 from investing_plz.storage import SQLiteBarStore
 
@@ -31,7 +33,13 @@ def _save_bars(database, closes: tuple[str, ...], opens: dict[int, str]) -> None
     store.save(bars)
 
 
-def _run_backtest_cli(database, *, show_fills: bool) -> int:
+def _run_backtest_cli(
+    database,
+    *,
+    show_fills: bool,
+    fee_rate: str = "0",
+    slippage_bps: str = "0",
+) -> int:
     args = [
         "backtest",
         "--venue", "upbit",
@@ -44,6 +52,8 @@ def _run_backtest_cli(database, *, show_fills: bool) -> int:
         "--target-weight", "0.5",
         "--quantity-step", "1",
         "--min-trade-amount", "10",
+        "--fee-rate", fee_rate,
+        "--slippage-bps", slippage_bps,
         "--max-order-amount", "10000",
         "--max-instrument-weight", "1",
         "--min-cash-reserve", "0",
@@ -112,8 +122,9 @@ def test_backtest_cli_reads_closed_bars_and_prints_result(tmp_path, capsys) -> N
     assert "bullish_signal_count=1" in output
     assert "fill_count=1" in output
     assert "final_cash=500" in output
-    assert "fee=0" in output
-    assert "slippage=0" in output
+    assert "fee_rate=0" in output
+    assert "slippage_bps=0" in output
+    assert "total_fees=0" in output
     assert "fills:" not in output
 
 
@@ -130,11 +141,11 @@ def test_show_fills_prints_all_fills_in_time_order_with_amount(tmp_path, capsys)
     output = capsys.readouterr().out
     first = (
         "1. timestamp=2024-01-05T00:00:00+00:00 side=BUY quantity=5 "
-        "fill_price=100 amount=500 strategy_id=moving_average_crossover"
+        "fill_price=100 amount=500 fee=0 strategy_id=moving_average_crossover"
     )
     second = (
         "2. timestamp=2024-01-07T00:00:00+00:00 side=SELL quantity=5 "
-        "fill_price=80 amount=400 strategy_id=moving_average_crossover"
+        "fill_price=80 amount=400 fee=0 strategy_id=moving_average_crossover"
     )
     assert "fills:\n" in output
     assert first in output
@@ -169,3 +180,52 @@ def test_show_fills_does_not_change_backtest_summary_values(tmp_path, capsys) ->
     assert "fills:" not in summary_only
     for key in ("fill_count", "final_cash", "final_position_quantity", "final_portfolio_value"):
         assert _output_value(summary_only, key) == _output_value(with_fills, key)
+
+
+def test_cost_options_parse_as_decimal() -> None:
+    args = build_parser().parse_args(
+        [
+            "backtest",
+            "--venue", "upbit",
+            "--symbol", "KRW-BTC",
+            "--timeframe", "day",
+            "--fee-rate", "0.0005",
+            "--slippage-bps", "5",
+        ]
+    )
+
+    assert args.fee_rate == Decimal("0.0005")
+    assert args.slippage_bps == Decimal("5")
+    assert isinstance(args.fee_rate, Decimal)
+    assert isinstance(args.slippage_bps, Decimal)
+
+
+def test_cost_cli_prints_settings_total_fees_and_fill_fee(tmp_path, capsys) -> None:
+    database = tmp_path / "costs.db"
+    _save_bars(
+        database,
+        ("3", "2", "1", "4", "0", "0", "1"),
+        {4: "100", 6: "80"},
+    )
+
+    assert _run_backtest_cli(
+        database,
+        show_fills=True,
+        fee_rate="0.01",
+        slippage_bps="100",
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "fee_rate=0.01" in output
+    assert "slippage_bps=100" in output
+    assert "total_fees=9.0100" in output
+    assert "fill_price=101.00 amount=505.00 fee=5.0500" in output
+    assert "fill_price=79.20 amount=396.00 fee=3.9600" in output
+
+
+def test_invalid_cost_option_uses_backtest_config_validation(tmp_path) -> None:
+    database = tmp_path / "invalid-cost.db"
+    _save_bars(database, ("1", "2", "3", "4", "5"), {})
+
+    with pytest.raises(ValueError, match="fee_rate"):
+        _run_backtest_cli(database, show_fills=False, fee_rate="-0.1")

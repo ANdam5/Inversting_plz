@@ -86,7 +86,17 @@
 - [x] target adjustment 중 반대 방향 미세조정 주문을 방지한다.
 - [x] 최소 주문 금액으로 초소액 BUY target adjustment를 종료한다.
 
-## M3-B — Fee / Slippage / Portfolio accounting / Metrics
+## M3-B1 — Execution Cost Realism
+
+- [x] deterministic adverse slippage를 구현하고 BUY/SELL 방향을 테스트한다.
+- [x] fee-aware Fill과 Portfolio 현금 회계를 구현한다.
+- [x] slippage-adjusted 가격으로 Risk를 평가하고 fee-aware affordability를 적용한다.
+- [x] 모든 Fill fee의 합계인 total fee reporting을 추가한다.
+- [x] CLI에서 fee/slippage를 Decimal 설정으로 전달한다.
+- [x] fee=0, slippage=0에서 기존 M3-A 결과를 회귀 검증한다.
+- [x] 비용 가정이 적용된 historical dataset 실행을 검증한다.
+
+## M3-B2 — Performance Analysis
 
 - [ ] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
 - [ ] Broker protocol을 정의하고 메모리 fake로 주문·체결 contract를 테스트한다.
