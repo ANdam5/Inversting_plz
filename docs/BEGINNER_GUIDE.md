@@ -81,6 +81,8 @@ Inversting_plz/
 │  │  ├─ __init__.py              # 주요 domain 모델 공개
 │  │  ├─ instrument.py            # 거래소와 종목을 나타내는 Instrument
 │  │  ├─ bar.py                   # 공통 OHLCV Bar와 기본 불변조건
+│  │  ├─ decimal.py               # 금융 값의 Decimal 타입 검사
+│  │  ├─ order_intent.py          # 실제 주문 전의 BUY/SELL 주문 후보
 │  │  └─ time.py                  # timezone-aware UTC 검사
 │  ├─ market_data/
 │  │  ├─ __init__.py              # market_data의 공개 이름 모음
@@ -393,6 +395,30 @@ Instrument + strategy_id + parameters
 | Signal | Strategy가 만든 판단 결과 | 구현됨, 주문 아님 |
 | Order | 거래소에 보내는 실제 거래 요청 | 아직 구현되지 않음 |
 
+### Signal과 OrderIntent
+
+```text
+Signal
+  → 시장에 대한 Strategy의 판단
+
+OrderIntent
+  → 계산 결과 만들어진 내부 주문 후보
+
+Risk Manager
+  → 주문 후보가 안전한지 검사 (아직 구현되지 않음)
+
+Order
+  → Broker로 제출되는 실제 주문 (아직 구현되지 않음)
+```
+
+`OrderIntent`에는 Instrument, UTC timestamp, strategy ID, BUY/SELL 방향, quantity가 있다. Broker 주문 ID, 체결 상태, 수수료, 가격 같은 실행 정보는 아직 없다. 따라서 OrderIntent가 생겨도 거래소에는 아무 요청도 전달되지 않는다.
+
+### 금융 값에 Decimal을 사용하는 이유
+
+Python의 `float`는 0.1 같은 십진수를 내부에서 정확히 표현하지 못해 작은 오차가 생길 수 있다. 가격, 수량, 금액 계산에서는 이런 오차가 쌓일 수 있으므로 이 프로젝트는 문자열로 만든 `Decimal`, 예를 들어 `Decimal("0.01")`을 사용한다. `OrderIntent.quantity`에 `0.01` 같은 float를 넣으면 명확하게 거부한다.
+
+OrderIntent를 저장하거나 전달할 때는 `to_dict()`로 timestamp, side, quantity를 문자열 중심의 단순한 dict로 바꾼다. `from_dict()`로 다시 만들면 원래 값과 타입이 보존된다.
+
 ### Crossover 규칙
 
 ```text
@@ -496,6 +522,7 @@ python -m pytest -q
 | `test_moving_average_strategy.py` | bullish/bearish 교차, neutral, 최소 Bar 수와 window 검증 |
 | `test_strategy_reuse.py` | 같은 Strategy의 KRW-BTC/KRW-ETH 및 서로 다른 parameter 재사용 |
 | `test_strategy_profile.py` | BTC/ETH Profile, Strategy 생성, fast/slow parameter 검증 |
+| `test_order_intent.py` | BUY/SELL Intent, Decimal·UTC 검증과 JSON round-trip |
 | `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
@@ -705,7 +732,8 @@ tests/
 | M1.5 | closed candle, historical dataset, summary | 완료 |
 | M2-A | Strategy, Signal, 20/60 MA crossover | 완료 |
 | M2-B1 | Instrument별 Strategy Profile | 완료 |
-| M2-B2 | OrderIntent와 position sizing | **아직 구현되지 않음** |
+| M2-B2-A | OrderIntent와 Decimal 기초 | 완료 |
+| M2-B2-B | Parameter 병합과 position sizing | **아직 구현되지 않음** |
 | M2-C | Risk Manager | **아직 구현되지 않음** |
 | M3 | Backtest | **아직 구현되지 않음** |
 

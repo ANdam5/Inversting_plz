@@ -51,10 +51,13 @@
 - [x] Profile에서 현재 MA Crossover Strategy를 생성하는 최소 경로를 구현한다.
 - [x] KRW-BTC와 KRW-ETH Profile이 같은 Strategy에 다른 parameter를 전달하는지 테스트한다.
 
-## M2-B2 — OrderIntent / Position sizing
+## M2-B2-A — OrderIntent / Decimal foundation
 
-- [ ] `OrderIntent` 최소 모델을 정의하고 serialization round-trip을 테스트한다.
-- [ ] 가격·수량·금액의 Decimal 정책을 정의하고 float 입력 거부를 테스트한다.
+- [x] `OrderIntent` 최소 모델을 정의하고 serialization round-trip을 테스트한다.
+- [x] 금융 가격·수량·금액은 Decimal을 사용하고 float 입력을 거부하는 기초 정책을 정의한다.
+
+## M2-B2-B — Parameter merge / Position sizing
+
 - [ ] instrument별 parameter 병합 우선순위를 구현하고 검증 실패를 테스트한다.
 - [ ] 목표 비중을 OrderIntent 수량으로 변환하고 Decimal 반올림을 테스트한다.
 - [ ] BTC와 ETF profile에 같은 Strategy를 적용하고 서로 다른 결과를 테스트한다.
