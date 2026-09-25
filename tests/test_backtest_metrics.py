@@ -1,16 +1,20 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
 
 from investing_plz.backtest import (
     EquityPoint,
+    calculate_cagr,
     calculate_max_drawdown,
     calculate_total_return,
     run_backtest,
 )
 from investing_plz.strategy import MovingAverageCrossoverStrategy
 from tests.test_backtest import bars_from_closes, config
+
+
+ONE_YEAR = timedelta(days=365, hours=6)
 
 
 def test_equity_curve_has_one_close_point_per_bar() -> None:
@@ -78,6 +82,40 @@ def test_total_return(initial: str, final: str, expected: str) -> None:
     assert calculate_total_return(Decimal(initial), Decimal(final)) == Decimal(expected)
 
 
+@pytest.mark.parametrize(
+    ("years", "initial", "final", "expected"),
+    [
+        (1, "100", "110", "0.10"),
+        (2, "100", "121", "0.10"),
+        (2, "100", "81", "-0.10"),
+        (3, "100", "100", "0"),
+    ],
+)
+def test_cagr_for_profit_loss_and_no_change(
+    years: int,
+    initial: str,
+    final: str,
+    expected: str,
+) -> None:
+    start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    actual = calculate_cagr(
+        Decimal(initial),
+        Decimal(final),
+        start,
+        start + ONE_YEAR * years,
+    )
+
+    assert abs(actual - Decimal(expected)) < Decimal("1E-25")
+
+
+def test_cagr_rejects_non_positive_initial_value_and_period() -> None:
+    start = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="initial_value"):
+        calculate_cagr(Decimal("0"), Decimal("100"), start, start + ONE_YEAR)
+    with pytest.raises(ValueError, match="period"):
+        calculate_cagr(Decimal("100"), Decimal("110"), start, start)
+
+
 def test_maximum_drawdown_uses_running_peak_and_is_negative() -> None:
     values = tuple(Decimal(value) for value in ("100", "120", "90", "110"))
 
@@ -123,3 +161,30 @@ def test_result_metrics_and_equity_curve_are_deterministic() -> None:
     assert first.equity_curve == second.equity_curve
     assert first.total_return == second.total_return
     assert first.maximum_drawdown == second.maximum_drawdown
+    assert first.cagr == second.cagr
+
+
+def test_cagr_observes_existing_result_without_changing_execution_outputs() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "0", "0", "1"],
+        opens={4: "100", 6: "80"},
+    )
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(fee_rate=Decimal("0.001"), slippage_bps=Decimal("5")),
+    )
+    execution_snapshot = (
+        result.fills,
+        result.final_portfolio_value,
+        result.total_return,
+        result.maximum_drawdown,
+    )
+
+    assert isinstance(result.cagr, Decimal)
+    assert (
+        result.fills,
+        result.final_portfolio_value,
+        result.total_return,
+        result.maximum_drawdown,
+    ) == execution_snapshot

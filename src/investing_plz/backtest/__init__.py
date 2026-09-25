@@ -1,7 +1,11 @@
 """Deterministic historical replay for the minimal backtest baseline."""
 
 from investing_plz.backtest.costs import apply_slippage, calculate_fee
-from investing_plz.backtest.metrics import calculate_max_drawdown, calculate_total_return
+from investing_plz.backtest.metrics import (
+    calculate_cagr,
+    calculate_max_drawdown,
+    calculate_total_return,
+)
 from investing_plz.backtest.models import (
     BacktestConfig,
     BacktestPortfolio,
@@ -19,6 +23,7 @@ __all__ = [
     "Fill",
     "apply_slippage",
     "calculate_fee",
+    "calculate_cagr",
     "calculate_max_drawdown",
     "calculate_total_return",
     "run_backtest",

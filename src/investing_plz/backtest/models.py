@@ -6,7 +6,11 @@ from investing_plz.domain import Instrument, OrderSide
 from investing_plz.domain.decimal import require_decimal
 from investing_plz.domain.time import require_utc
 from investing_plz.risk import RiskLimits
-from investing_plz.backtest.metrics import calculate_max_drawdown, calculate_total_return
+from investing_plz.backtest.metrics import (
+    calculate_cagr,
+    calculate_max_drawdown,
+    calculate_total_return,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,4 +162,15 @@ class BacktestResult:
     def maximum_drawdown(self) -> Decimal:
         return calculate_max_drawdown(
             tuple(point.portfolio_value for point in self.equity_curve)
+        )
+
+    @property
+    def cagr(self) -> Decimal:
+        if not self.equity_curve:
+            raise ValueError("equity curve must not be empty")
+        return calculate_cagr(
+            self.initial_cash,
+            self.final_portfolio_value,
+            self.equity_curve[0].timestamp,
+            self.equity_curve[-1].timestamp,
         )
