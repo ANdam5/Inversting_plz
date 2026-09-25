@@ -69,9 +69,7 @@
 - [x] 최소 현금 보유 규칙을 구현하고 주문 축소를 테스트한다.
 - [x] 최대 단일 주문 금액 규칙을 구현하고 경계값을 테스트한다.
 
-## M2-C2 — Pending order / operating risk
-
-- [ ] Order 상태 모델이 생긴 뒤 중복 미체결 주문 차단과 동일 intent 재처리를 테스트한다.
+> Note: 동일 Intent 재처리와 중복 미체결 주문 차단은 Order/Broker 상태가 필요한 운영 위험이므로 M4 Paper Trading으로 이동했다.
 
 ## M3 — Backtest와 Portfolio
 
@@ -97,6 +95,7 @@
 - [ ] real clock과 polling scheduler를 구현하고 fake clock으로 주기를 테스트한다.
 - [ ] paper broker를 구현하고 Broker contract suite를 통과시킨다.
 - [ ] 주문 idempotency key 생성을 구현하고 재처리 시 동일 키를 테스트한다.
+- [ ] 동일 Intent 재처리 및 중복 미체결 주문 제출 차단을 테스트한다.
 - [ ] 주문·체결 이벤트 영속화를 구현하고 재시작 복구를 테스트한다.
 - [ ] 저장 상태와 broker 상태 reconciliation을 구현하고 불일치 시나리오를 테스트한다.
 - [ ] stale market data 차단 규칙을 구현하고 신규 주문 거부를 테스트한다.
