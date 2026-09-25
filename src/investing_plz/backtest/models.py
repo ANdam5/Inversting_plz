@@ -18,6 +18,7 @@ class Fill:
     quantity: Decimal
     fill_price: Decimal
     strategy_id: str
+    fee_amount: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         if not isinstance(self.instrument, Instrument):
@@ -27,10 +28,13 @@ class Fill:
             raise TypeError("side must be an OrderSide")
         require_decimal(self.quantity, name="quantity")
         require_decimal(self.fill_price, name="fill_price")
+        require_decimal(self.fee_amount, name="fee_amount")
         if self.quantity <= 0:
             raise ValueError("quantity must be greater than zero")
         if self.fill_price <= 0:
             raise ValueError("fill_price must be greater than zero")
+        if self.fee_amount < 0:
+            raise ValueError("fee_amount must not be negative")
         if not self.strategy_id.strip():
             raise ValueError("strategy_id must not be empty")
 
@@ -80,12 +84,16 @@ class BacktestConfig:
     quantity_step: Decimal
     risk_limits: RiskLimits
     min_trade_amount: Decimal = Decimal("0")
+    fee_rate: Decimal = Decimal("0")
+    slippage_bps: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         require_decimal(self.initial_cash, name="initial_cash")
         require_decimal(self.target_weight, name="target_weight")
         require_decimal(self.quantity_step, name="quantity_step")
         require_decimal(self.min_trade_amount, name="min_trade_amount")
+        require_decimal(self.fee_rate, name="fee_rate")
+        require_decimal(self.slippage_bps, name="slippage_bps")
         if self.initial_cash < 0:
             raise ValueError("initial_cash must not be negative")
         if not Decimal("0") <= self.target_weight <= Decimal("1"):
@@ -94,6 +102,10 @@ class BacktestConfig:
             raise ValueError("quantity_step must be greater than zero")
         if self.min_trade_amount < 0:
             raise ValueError("min_trade_amount must not be negative")
+        if not Decimal("0") <= self.fee_rate < Decimal("1"):
+            raise ValueError("fee_rate must be at least 0 and less than 1")
+        if not Decimal("0") <= self.slippage_bps < Decimal("10000"):
+            raise ValueError("slippage_bps must be at least 0 and less than 10000")
         if not isinstance(self.risk_limits, RiskLimits):
             raise TypeError("risk_limits must be RiskLimits")
 
