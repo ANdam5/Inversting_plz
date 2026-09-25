@@ -35,21 +35,30 @@
 - [x] 데이터셋 row/closed/range/duplicate/gap summary를 구현하고 테스트한다.
 - [x] 데이터셋 summary CLI를 추가하고 출력 결과를 테스트한다.
 
-## M2 — Strategy와 Risk
+## M2-A — Strategy / Signal
 
-- [ ] Strategy protocol을 정의하고 broker 의존성이 없는 fake Strategy로 테스트한다.
-- [ ] `Signal`과 `OrderIntent` 최소 모델을 정의하고 serialization round-trip을 테스트한다.
+- [x] Strategy protocol을 정의하고 Broker·Upbit·SQLite에 의존하지 않는 구현을 테스트한다.
+- [x] `Signal` 최소 모델과 bullish/bearish/neutral 유형을 정의하고 테스트한다.
+- [x] Decimal 종가 기반 Simple Moving Average를 구현하고 경계 길이·결측 입력을 테스트한다.
+- [x] 이동평균 교차 Strategy가 실제 bullish/bearish 교차와 neutral을 구분하는지 테스트한다.
+- [x] closed Bar만 조회해 20/60 Strategy Signal을 출력하는 read-only CLI를 구현하고 테스트한다.
+- [x] 동일 Strategy의 다중 Instrument 및 parameter 재사용성을 테스트한다.
+
+## M2-B — OrderIntent / Parameter / Position sizing
+
+- [ ] `OrderIntent` 최소 모델을 정의하고 serialization round-trip을 테스트한다.
 - [ ] 가격·수량·금액의 Decimal 정책을 정의하고 float 입력 거부를 테스트한다.
 - [ ] instrument별 parameter 병합 우선순위를 구현하고 검증 실패를 테스트한다.
-- [ ] 이동평균 계산기를 구현하고 경계 길이/결측 입력을 테스트한다.
-- [ ] 이동평균 교차 Strategy를 구현하고 고정 Bar 시퀀스의 Signal을 테스트한다.
 - [ ] 목표 비중을 OrderIntent 수량으로 변환하고 Decimal 반올림을 테스트한다.
+- [ ] BTC와 ETF profile에 같은 Strategy를 적용하고 서로 다른 결과를 테스트한다.
+
+## M2-C — Risk Manager
+
 - [ ] Risk Manager protocol을 정의하고 승인·거부 결과를 테스트한다.
 - [ ] 최대 단일 종목 비중 규칙을 구현하고 축소/거부를 테스트한다.
 - [ ] 최소 현금 보유 규칙을 구현하고 주문 축소를 테스트한다.
 - [ ] 최대 주문 금액 규칙을 구현하고 경계값을 테스트한다.
 - [ ] 중복 미체결 주문 차단 규칙을 구현하고 동일 intent 재처리를 테스트한다.
-- [ ] BTC와 ETF profile에 같은 Strategy를 적용하고 서로 다른 결과를 테스트한다.
 
 ## M3 — Backtest와 Portfolio
 

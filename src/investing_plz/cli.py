@@ -6,6 +6,7 @@ from pathlib import Path
 from investing_plz.adapters.upbit import UpbitMarketDataProvider
 from investing_plz.application.collect import collect_bars
 from investing_plz.domain import Instrument
+from investing_plz.strategy import MovingAverageCrossoverStrategy
 from investing_plz.storage import SQLiteBarStore
 
 
@@ -29,6 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--symbol", required=True)
     summary.add_argument("--timeframe", required=True, choices=["day"])
     summary.add_argument("--database", type=Path, default=Path("data/market.db"))
+
+    signal = commands.add_parser("signal", help="evaluate a strategy signal")
+    signal.add_argument("--venue", required=True)
+    signal.add_argument("--symbol", required=True)
+    signal.add_argument("--timeframe", required=True, choices=["day"])
+    signal.add_argument("--database", type=Path, default=Path("data/market.db"))
+    signal.add_argument("--fast", type=int, default=20)
+    signal.add_argument("--slow", type=int, default=60)
     return parser
 
 
@@ -55,6 +64,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         ):
             value = getattr(summary, field)
             print(f"{field}={value.isoformat() if isinstance(value, datetime) else value}")
+        return 0
+
+    if args.command == "signal":
+        store = SQLiteBarStore(args.database)
+        bars = store.load_closed_bars(
+            instrument,
+            args.timeframe,
+            now=_utc_now(),
+        )
+        strategy = MovingAverageCrossoverStrategy(
+            fast_window=args.fast,
+            slow_window=args.slow,
+        )
+        evaluation = strategy.evaluate(bars)
+        latest = bars[-1]
+        output = {
+            "instrument": f"{instrument.venue}:{instrument.symbol}",
+            "latest_closed_timestamp": latest.timestamp.isoformat(),
+            "latest_close": latest.close,
+            "fast_window": strategy.fast_window,
+            "slow_window": strategy.slow_window,
+            "previous_fast_ma": evaluation.previous_fast_ma,
+            "previous_slow_ma": evaluation.previous_slow_ma,
+            "current_fast_ma": evaluation.current_fast_ma,
+            "current_slow_ma": evaluation.current_slow_ma,
+            "latest_signal": evaluation.signal.signal_type.value,
+        }
+        for key, value in output.items():
+            print(f"{key}={value}")
         return 0
 
     provider = UpbitMarketDataProvider(timeout=args.timeout, max_pages=args.pages)

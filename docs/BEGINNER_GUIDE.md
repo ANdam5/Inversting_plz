@@ -17,7 +17,7 @@ Upbit
 
 여기서 **일봉**은 하루 동안의 시가, 고가, 저가, 종가, 거래량을 한 묶음으로 표현한 데이터다.
 
-현재 단계는 자동매매 프로그램 전체가 아니다. 자동투자에 필요한 시장 데이터를 안정적으로 모으고, 나중에 전략과 백테스트가 사용할 과거 데이터셋을 준비한 상태다. 아직 매수·매도 판단이나 주문은 하지 않는다.
+현재는 수집한 데이터로 20일·60일 이동평균 교차 Signal까지 계산할 수 있다. 하지만 자동매매 프로그램 전체는 아니며, 실제 주문이나 백테스트는 하지 않는다.
 
 ## 2. 현재 할 수 있는 것 / 아직 할 수 없는 것
 
@@ -34,12 +34,12 @@ Upbit
 - 현재 진행 중인 일봉과 완료된 일봉 구분하기
 - 완료된 일봉만 SQLite에서 조회하기
 - summary 명령으로 데이터셋 상태 확인하기
+- 종가의 Simple Moving Average(SMA) 계산하기
+- 20일·60일 이동평균의 실제 교차 시점에 Strategy Signal 만들기
+- signal 명령으로 최신 closed Bar 기준 판단 확인하기
 
 ### 현재 불가능한 것
 
-- 투자전략 판단
-- BUY 또는 SELL Signal 생성
-- 이동평균 계산과 매매 규칙 실행
 - 백테스트 실행
 - 수익률과 손익 계산
 - 주문 생성 또는 제출
@@ -68,6 +68,9 @@ Inversting_plz/
 │  ├─ __init__.py                  # investing_plz를 Python 패키지로 표시
 │  ├─ __main__.py                  # python -m investing_plz 실행 시작점
 │  ├─ cli.py                       # collect/summary 명령과 옵션 처리
+│  ├─ indicators/
+│  │  ├─ __init__.py              # indicator 함수 공개
+│  │  └─ moving_average.py        # Decimal 종가의 Simple Moving Average
 │  ├─ adapters/
 │  │  ├─ __init__.py              # adapters 패키지 표시
 │  │  └─ upbit.py                 # Upbit HTTP 요청과 응답→Bar 변환
@@ -86,6 +89,11 @@ Inversting_plz/
 │  │  ├─ validation.py            # 중복·정렬·일봉 gap 검사
 │  │  ├─ candles.py               # closed candle 판정
 │  │  └─ dataset.py               # DatasetSummary 결과 구조
+│  ├─ strategy/
+│     ├─ __init__.py              # Strategy 관련 공개 이름 모음
+│     ├─ protocol.py              # Strategy가 따라야 하는 최소 약속
+│     ├─ signal.py                # Signal과 bullish/bearish/neutral 유형
+│     └─ moving_average_crossover.py # MA 교차 규칙과 계산 결과
 │  └─ storage/
 │     ├─ __init__.py              # storage 패키지와 SQLiteBarStore 공개
 │     └─ sqlite.py                # SQLite 생성·저장·조회·summary
@@ -102,6 +110,9 @@ Inversting_plz/
    ├─ test_instrument.py
    ├─ test_market_data_provider.py
    ├─ test_market_data_validation.py
+   ├─ test_moving_average.py
+   ├─ test_moving_average_strategy.py
+   ├─ test_signal_cli.py
    ├─ test_smoke.py
    ├─ test_sqlite_bar_store.py
    ├─ test_upbit_provider.py
@@ -307,6 +318,113 @@ python -m investing_plz summary `
 
 현재 `krw_btc_5y.db`의 확인 결과는 전체 2,000개, closed 1,999개, duplicate 0개, gap 0개다.
 
+## 9A. Moving Average, Strategy, Signal
+
+### Moving Average란 무엇인가
+
+Moving Average(MA, 이동평균)는 최근 N개 종가의 평균이다. 매일 크게 흔들리는 가격을 조금 부드럽게 보게 해준다. 현재 코드는 `simple_moving_average(values, window)`로 계산하며 외부 라이브러리 없이 `Decimal` 값을 그대로 사용한다.
+
+- **fast MA**: 짧은 기간 평균이다. 기본값은 최근 20개 일봉이며 최근 가격 변화에 더 빨리 반응한다.
+- **slow MA**: 긴 기간 평균이다. 기본값은 최근 60개 일봉이며 더 천천히 움직인다.
+
+### Strategy와 Signal
+
+Strategy는 시장 데이터를 받아 정해진 규칙으로 판단하는 코드다. 현재 `MovingAverageCrossoverStrategy`는 직전 fast/slow MA와 현재 fast/slow MA를 비교해 실제 교차가 일어난 날만 crossover Signal을 만든다.
+
+Signal은 Strategy의 판단 결과이며 실제 주문이 아니다. 현재 Signal은 `bullish_crossover`, `bearish_crossover`, `neutral` 중 하나다. `bullish_crossover`도 “매수 주문을 보냈다”는 뜻이 아니라 이동평균 규칙이 상승 교차를 발견했다는 뜻일 뿐이다.
+
+### Instrument, Strategy, Parameter는 서로 별개다
+
+- **Instrument**는 무엇을 분석하거나 투자할지 나타낸다. 예: `upbit:KRW-BTC`, `upbit:KRW-ETH`, 향후 `stock:SPY`.
+- **Strategy**는 어떤 규칙으로 판단할지 나타낸다. 현재 구현된 것은 `MovingAverageCrossoverStrategy` 하나뿐이다.
+- **Parameter**는 같은 Strategy를 어떤 설정으로 사용할지 나타낸다. 여기서는 `fast_window`와 `slow_window`다.
+- **Risk**는 Signal이 생겼을 때 실제로 얼마를 투자할지 정하는 영역이며 아직 구현되지 않았다.
+
+따라서 Strategy 내부에서 종목 이름을 보고 규칙을 바꾸지 않는다. 사용자가 같은 Strategy class에 서로 다른 Instrument의 Bar와 서로 다른 parameter를 전달한다.
+
+```text
+KRW-BTC → MovingAverageCrossoverStrategy → fast=20, slow=60
+KRW-ETH → MovingAverageCrossoverStrategy → fast=15, slow=50
+
+향후 가능한 선택:
+KRW-XRP → BreakoutStrategy
+```
+
+마지막 예시의 `BreakoutStrategy`는 구조를 설명하기 위한 미래 예시일 뿐 현재 코드에는 구현되어 있지 않다. YAML, Strategy registry, 종목별 profile loader도 아직 없다.
+
+| 개념 | 의미 | 현재 상태 |
+|---|---|---|
+| Bar | 시장의 시가·고가·저가·종가·거래량 | 구현됨 |
+| Indicator / MA | Bar의 종가로 계산한 값 | 구현됨 |
+| Strategy | Indicator를 보고 판단하는 규칙 | MA crossover만 구현됨 |
+| Signal | Strategy가 만든 판단 결과 | 구현됨, 주문 아님 |
+| Order | 거래소에 보내는 실제 거래 요청 | 아직 구현되지 않음 |
+
+### Crossover 규칙
+
+```text
+bullish crossover:
+직전 fast <= 직전 slow, 현재 fast > 현재 slow
+
+bearish crossover:
+직전 fast >= 직전 slow, 현재 fast < 현재 slow
+
+그 외:
+neutral
+```
+
+단순히 fast MA가 slow MA보다 높은 상태가 계속된다고 매일 bullish Signal을 만들지 않는다. 직전과 현재 사이에 실제로 선이 교차한 순간만 crossover다. 직전 60일 평균과 현재 60일 평균이 모두 필요하므로 20/60 설정에는 최소 61개의 closed Bar가 필요하다.
+
+### `signal` CLI
+
+```powershell
+python -m investing_plz signal `
+  --venue upbit `
+  --symbol KRW-BTC `
+  --timeframe day `
+  --database data\krw_btc_5y.db `
+  --fast 20 `
+  --slow 60
+```
+
+실제 실행 순서는 다음과 같다.
+
+```text
+cli.py의 main()
+  ↓
+SQLiteBarStore.load_closed_bars()
+  ↓
+완료된 Bar만 반환
+  ↓
+MovingAverageCrossoverStrategy.evaluate()
+  ↓
+simple_moving_average()
+  ↓
+Signal + 직전/현재 MA
+  ↓
+터미널 출력
+```
+
+데이터 흐름으로 보면 더 간단하다.
+
+```text
+data/krw_btc_5y.db
+  ↓
+closed Bars
+  ↓
+Moving Average
+  ↓
+MA Crossover Strategy
+  ↓
+Signal
+  ↓
+터미널 출력
+```
+
+이 명령은 DB를 읽기만 한다. 현재 진행 중인 오늘 일봉은 `load_closed_bars()`에서 제외된다.
+
+`signal`을 실제 실행하면 저장된 시장 데이터로 현재 판단을 계산한다. 반면 Strategy 테스트는 사람이 만든 고정 Bar를 사용해 bullish, bearish, neutral 규칙이 언제나 같은 결과를 내는지 검사한다. 테스트는 실제 투자 판단이나 주문을 수행하지 않는다.
+
 ## 10. pytest란 무엇인가
 
 다음 명령은 시장 데이터를 수집하는 명령이 아니다.
@@ -341,6 +459,10 @@ python -m pytest -q
 | `test_upbit_provider.py` | 저장된 Upbit fixture가 올바른 Bar로 변환되고 시간순으로 반환되는지 |
 | `test_upbit_robustness.py` | pagination, 페이지 경계, timeout, 429, 중복, 잘못된 순서와 OHLCV |
 | `test_market_data_validation.py` | Bar 목록의 중복·역순·일봉 gap 검사 |
+| `test_moving_average.py` | SMA 정상 계산, 정확한 길이, 부족한 데이터, 잘못된 window |
+| `test_moving_average_strategy.py` | bullish/bearish 교차, neutral, 최소 Bar 수와 window 검증 |
+| `test_strategy_reuse.py` | 같은 Strategy의 KRW-BTC/KRW-ETH 및 서로 다른 parameter 재사용 |
+| `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
 | `test_closed_candles.py` | 과거/현재 일봉과 정확한 UTC 종료 경계 판정 |
@@ -434,6 +556,20 @@ python -m investing_plz summary `
 
 저장 개수, closed 개수, 날짜 범위, 중복과 gap을 출력한다.
 
+### 최신 MA crossover Signal 확인
+
+```powershell
+python -m investing_plz signal `
+  --venue upbit `
+  --symbol KRW-BTC `
+  --timeframe day `
+  --database data\krw_btc_5y.db `
+  --fast 20 `
+  --slow 60
+```
+
+완료된 일봉만 읽어 직전·현재 20일/60일 MA와 Strategy Signal을 출력한다. DB는 수정하지 않으며 주문도 만들지 않는다.
+
 ### SQLite row 수 직접 확인
 
 ```powershell
@@ -463,6 +599,7 @@ git status --short
 | 구분 | 예시 | 목적 | 실제 데이터 변경 |
 |---|---|---|---|
 | A. 프로그램 실행 | `python -m investing_plz collect ...` | Upbit에서 시장 데이터를 가져와 지정한 DB에 저장 | 예. SQLite DB가 생성되거나 새 행이 추가됨 |
+| A-2. 분석 실행 | `python -m investing_plz signal ...` | 저장된 closed Bar로 MA와 Signal 계산 | 아니요. DB를 읽기만 함 |
 | B. 테스트 실행 | `python -m pytest -q` | 코드가 예상대로 작동하는지 자동 검사 | 실제 dataset은 변경하지 않음. 테스트용 임시 파일 사용 |
 | C. 산출물 확인 | `summary` 명령, `data/krw_btc_5y.db` | 실제 저장 결과의 수량·기간·품질 확인 | summary는 읽기만 하며 DB 내용을 바꾸지 않음 |
 
@@ -501,6 +638,15 @@ git status --short
                  ┌───────┴────────┐
                  ▼                ▼
           closed Bar 조회     summary CLI
+                 │
+                 ▼
+             20/60 MA
+                 │
+                 ▼
+        MA Crossover Strategy
+                 │
+                 ▼
+               Signal
 ```
 
 ### 테스트 흐름
@@ -523,10 +669,12 @@ tests/
 | M0 | Python package, Instrument, Bar, MarketDataProvider 기본 구조 | 완료 |
 | M1 | Upbit 일봉 수집, pagination, 검증, SQLite, CLI | 완료 |
 | M1.5 | closed candle, historical dataset, summary | 완료 |
-| M2 | Strategy와 Signal | **아직 구현되지 않음** |
+| M2-A | Strategy, Signal, 20/60 MA crossover | 완료 |
+| M2-B | OrderIntent, parameter, position sizing | **아직 구현되지 않음** |
+| M2-C | Risk Manager | **아직 구현되지 않음** |
 | M3 | Backtest | **아직 구현되지 않음** |
 
-다음 예정 단계는 M2지만, 현재 저장소에는 Strategy, Signal, 주문 로직이 없다. M3의 백테스트 엔진도 아직 없다. 지금 만들어진 것은 그 기능들이 나중에 믿고 사용할 수 있는 데이터 기반이다.
+현재 저장소에는 최초 baseline Strategy와 Signal까지만 있다. OrderIntent, 주문 수량, Risk Manager와 주문 로직은 없으며 M3의 백테스트 엔진도 아직 없다.
 
 ## 17. 초보자가 지금 이해하면 충분한 것
 
