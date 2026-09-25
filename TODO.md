@@ -79,6 +79,7 @@
 - [x] Signal을 다음 Bar open에서 sizing·Risk·Fill하여 look-ahead를 방지한다.
 - [x] 기존 Position sizing과 `BasicRiskManager`를 Backtest에서 재사용한다.
 - [x] backtest CLI를 추가하고 작은 SQLite fixture로 end-to-end 테스트한다.
+- [x] optional CLI fill detail output을 추가하고 출력 순서·금액을 테스트한다.
 
 ## M3-B — Fee / Slippage / Portfolio accounting / Metrics
 

@@ -63,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument(
         "--min-cash-reserve", type=Decimal, default=Decimal("1000000")
     )
+    backtest.add_argument(
+        "--show-fills",
+        action="store_true",
+        help="print simulated fill details after the summary",
+    )
     return parser
 
 
@@ -170,6 +175,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         for key, value in output.items():
             print(f"{key}={value}")
+        if args.show_fills:
+            print("fills:")
+            for sequence, fill in enumerate(result.fills, start=1):
+                amount = fill.quantity * fill.fill_price
+                print(
+                    f"{sequence}. timestamp={fill.timestamp.isoformat()} "
+                    f"side={fill.side.value.upper()} quantity={fill.quantity} "
+                    f"fill_price={fill.fill_price} amount={amount} "
+                    f"strategy_id={fill.strategy_id}"
+                )
         return 0
 
     provider = UpbitMarketDataProvider(timeout=args.timeout, max_pages=args.pages)

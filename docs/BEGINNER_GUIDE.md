@@ -628,6 +628,19 @@ python -m investing_plz backtest `
 
 이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. 현재 baseline은 `fee=0`, `slippage=0`이며 평균단가, 실현손익, MDD 같은 성과 지표도 없으므로 결과만 보고 Strategy가 좋다고 판단하면 안 된다.
 
+가상 체결 내역도 확인하려면 같은 명령 끝에 `--show-fills`를 붙인다.
+
+```powershell
+python -m investing_plz backtest `
+  --venue upbit `
+  --symbol KRW-BTC `
+  --timeframe day `
+  --database data\krw_btc_5y.db `
+  --show-fills
+```
+
+`--show-fills`는 Backtest 계산을 바꾸지 않고, 이미 계산된 Fill의 시간, BUY/SELL 방향, 수량, 체결 가격과 금액을 요약 아래에 추가로 보여 주는 선택 옵션이다.
+
 ## 10. pytest란 무엇인가
 
 다음 명령은 시장 데이터를 수집하는 명령이 아니다.
