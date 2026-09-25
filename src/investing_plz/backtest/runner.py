@@ -4,6 +4,7 @@ from decimal import Decimal
 from investing_plz.application.position_sizing import (
     create_target_weight_order_intent,
 )
+from investing_plz.backtest.costs import apply_slippage, calculate_fee
 from investing_plz.backtest.models import (
     BacktestConfig,
     BacktestPortfolio,
@@ -11,6 +12,7 @@ from investing_plz.backtest.models import (
     Fill,
 )
 from investing_plz.domain import Bar, OrderSide
+from investing_plz.domain.decimal import round_down_to_step
 from investing_plz.risk import BasicRiskManager, RiskContext, RiskStatus
 from investing_plz.strategy import MovingAverageCrossoverStrategy, SignalType
 
@@ -58,13 +60,21 @@ def run_backtest(
                 ):
                     rebalance_pending = False
                 else:
+                    fill_price = apply_slippage(
+                        bar.open,
+                        intent.side,
+                        config.slippage_bps,
+                    )
+                    risk_portfolio_value = portfolio.value_at(fill_price)
                     decision = risk_manager.evaluate(
                         intent,
                         RiskContext(
-                            portfolio_value=portfolio_value,
+                            portfolio_value=risk_portfolio_value,
                             available_cash=portfolio.cash,
-                            current_position_value=portfolio.position_quantity * bar.open,
-                            current_price=bar.open,
+                            current_position_value=(
+                                portfolio.position_quantity * fill_price
+                            ),
+                            current_price=fill_price,
                             quantity_step=config.quantity_step,
                         ),
                         config.risk_limits,
@@ -81,16 +91,45 @@ def run_backtest(
 
                     if decision.approved_intent is not None:
                         approved_intent = decision.approved_intent
-                        fill = Fill(
-                            instrument=approved_intent.instrument,
-                            timestamp=bar.timestamp,
-                            side=approved_intent.side,
-                            quantity=approved_intent.quantity,
-                            fill_price=bar.open,
-                            strategy_id=approved_intent.strategy_id,
-                        )
-                        portfolio = portfolio.apply(fill)
-                        fills.append(fill)
+                        fill_quantity = approved_intent.quantity
+                        affordability_reduced = False
+                        if approved_intent.side is OrderSide.BUY:
+                            available_spend = max(
+                                Decimal("0"),
+                                portfolio.cash - config.risk_limits.min_cash_reserve,
+                            )
+                            per_unit_cost = fill_price * (
+                                Decimal("1") + config.fee_rate
+                            )
+                            affordable_quantity = round_down_to_step(
+                                available_spend / per_unit_cost,
+                                config.quantity_step,
+                            )
+                            if affordable_quantity < fill_quantity:
+                                fill_quantity = affordable_quantity
+                                affordability_reduced = True
+
+                        if fill_quantity == 0:
+                            rebalance_pending = False
+                        else:
+                            fee_amount = calculate_fee(
+                                fill_quantity,
+                                fill_price,
+                                config.fee_rate,
+                            )
+                            fill = Fill(
+                                instrument=approved_intent.instrument,
+                                timestamp=bar.timestamp,
+                                side=approved_intent.side,
+                                quantity=fill_quantity,
+                                fill_price=fill_price,
+                                strategy_id=approved_intent.strategy_id,
+                                fee_amount=fee_amount,
+                            )
+                            portfolio = portfolio.apply(fill)
+                            fills.append(fill)
+                            if affordability_reduced:
+                                rebalance_pending = False
 
         history = bars[: index + 1]
         if len(history) < strategy.minimum_bars:

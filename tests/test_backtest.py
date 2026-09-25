@@ -343,6 +343,117 @@ def test_invalid_min_trade_amount_is_rejected(value) -> None:
         config(min_trade_amount=value)
 
 
+def test_buy_uses_adverse_slippage_and_fee_aware_cash_accounting() -> None:
+    bars = bars_from_closes(["3", "2", "1", "4", "5"], opens={4: "100"})
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(fee_rate=Decimal("0.01"), slippage_bps=Decimal("100")),
+    )
+
+    fill = result.fills[0]
+    assert fill.timestamp == bars[4].timestamp
+    assert fill.fill_price == Decimal("101.00")
+    assert fill.fill_price > bars[4].open
+    assert fill.fee_amount == Decimal("5.0500")
+    assert result.final_cash == Decimal("489.9500")
+    assert result.final_position_quantity == Decimal("5")
+
+
+def test_sell_uses_adverse_slippage_and_net_fee_proceeds() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "0", "0", "1"],
+        opens={4: "100", 6: "80"},
+    )
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(fee_rate=Decimal("0.01"), slippage_bps=Decimal("100")),
+    )
+
+    sell = result.fills[-1]
+    assert sell.side is OrderSide.SELL
+    assert sell.fill_price == Decimal("79.20")
+    assert sell.fill_price < bars[6].open
+    assert sell.fee_amount == Decimal("3.9600")
+    assert result.final_cash == Decimal("881.9900")
+    assert result.final_position_quantity == Decimal("0")
+
+
+def test_risk_uses_slippage_adjusted_fill_price() -> None:
+    result = run_backtest(
+        bars_from_closes(["3", "2", "1", "4", "5"], opens={4: "100"}),
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            slippage_bps=Decimal("100"),
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("500"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("0"),
+            ),
+        ),
+    )
+
+    assert result.adjusted_count == 1
+    assert result.fills[0].fill_price == Decimal("101.00")
+    assert result.fills[0].quantity == Decimal("4")
+    assert result.fills[0].quantity * result.fills[0].fill_price <= Decimal("500")
+
+
+def test_fee_aware_affordability_rounds_down_and_preserves_cash_reserve() -> None:
+    result = run_backtest(
+        bars_from_closes(["3", "2", "1", "4", "5", "6", "7"], opens={4: "100"}),
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            target_weight=Decimal("1"),
+            fee_rate=Decimal("0.10"),
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("10000"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("100"),
+            ),
+        ),
+    )
+
+    assert result.fills[0].quantity == Decimal("8")
+    assert result.fills[0].fee_amount == Decimal("80.00")
+    assert result.final_cash == Decimal("120.00")
+    assert result.final_cash >= Decimal("100")
+    assert result.final_cash >= Decimal("0")
+    assert result.fill_count == 1
+
+
+def test_zero_cost_settings_match_legacy_defaults() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "0", "0", "1"],
+        opens={4: "100", 6: "80"},
+    )
+    strategy = MovingAverageCrossoverStrategy(fast_window=2, slow_window=3)
+
+    legacy = run_backtest(bars, strategy, config())
+    explicit_zero = run_backtest(
+        bars,
+        strategy,
+        config(fee_rate=Decimal("0"), slippage_bps=Decimal("0")),
+    )
+
+    assert explicit_zero == legacy
+    assert all(fill.fee_amount == Decimal("0") for fill in explicit_zero.fills)
+
+
+def test_cost_aware_backtest_is_deterministic() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "0", "0", "1"],
+        opens={4: "100", 6: "80"},
+    )
+    strategy = MovingAverageCrossoverStrategy(fast_window=2, slow_window=3)
+    cost_config = config(fee_rate=Decimal("0.001"), slippage_bps=Decimal("5"))
+
+    assert run_backtest(bars, strategy, cost_config) == run_backtest(
+        bars, strategy, cost_config
+    )
+
+
 def test_risk_rejected_creates_no_fill() -> None:
     result = run_backtest(
         bars_from_closes(["3", "2", "1", "4", "5"], opens={4: "100"}),

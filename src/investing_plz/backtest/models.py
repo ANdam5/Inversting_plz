@@ -63,16 +63,17 @@ class BacktestPortfolio:
     def apply(self, fill: Fill) -> "BacktestPortfolio":
         amount = fill.quantity * fill.fill_price
         if fill.side is OrderSide.BUY:
-            if amount > self.cash:
+            cash_outflow = amount + fill.fee_amount
+            if cash_outflow > self.cash:
                 raise ValueError("BUY fill amount exceeds available cash")
             return BacktestPortfolio(
-                cash=self.cash - amount,
+                cash=self.cash - cash_outflow,
                 position_quantity=self.position_quantity + fill.quantity,
             )
         if fill.quantity > self.position_quantity:
             raise ValueError("SELL fill quantity exceeds the current position")
         return BacktestPortfolio(
-            cash=self.cash + amount,
+            cash=self.cash + amount - fill.fee_amount,
             position_quantity=self.position_quantity - fill.quantity,
         )
 
