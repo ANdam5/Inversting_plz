@@ -49,3 +49,22 @@ def test_duplicate_bar_is_ignored(tmp_path) -> None:
     assert store.save([make_bar()]) == 0
     assert store.count() == 1
 
+
+def test_returns_latest_timestamp_for_instrument_and_interval(tmp_path) -> None:
+    store = SQLiteBarStore(tmp_path / "market.db")
+    store.initialize()
+    older = make_bar()
+    newer = Bar(
+        instrument=older.instrument,
+        interval=older.interval,
+        timestamp=datetime(2026, 9, 25, tzinfo=timezone.utc),
+        open=older.open,
+        high=older.high,
+        low=older.low,
+        close=older.close,
+        volume=older.volume,
+    )
+    store.save([older, newer])
+
+    assert store.latest_timestamp(older.instrument, "day") == newer.timestamp
+    assert store.latest_timestamp(older.instrument, "missing") is None

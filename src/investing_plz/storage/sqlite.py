@@ -1,8 +1,9 @@
 import sqlite3
 from collections.abc import Sequence
+from datetime import datetime
 from pathlib import Path
 
-from investing_plz.domain import Bar
+from investing_plz.domain import Bar, Instrument
 
 
 class SQLiteBarStore:
@@ -57,8 +58,33 @@ class SQLiteBarStore:
             )
             return connection.total_changes - before
 
-    def count(self) -> int:
+    def latest_timestamp(
+        self, instrument: Instrument, interval: str
+    ) -> datetime | None:
         with sqlite3.connect(self.database) as connection:
-            row = connection.execute("SELECT COUNT(*) FROM bars").fetchone()
-        return int(row[0])
+            row = connection.execute(
+                """
+                SELECT MAX(timestamp) FROM bars
+                WHERE venue = ? AND symbol = ? AND interval = ?
+                """,
+                (instrument.venue, instrument.symbol, interval),
+            ).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] is not None else None
 
+    def count(
+        self,
+        instrument: Instrument | None = None,
+        interval: str | None = None,
+    ) -> int:
+        with sqlite3.connect(self.database) as connection:
+            if instrument is None:
+                row = connection.execute("SELECT COUNT(*) FROM bars").fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) FROM bars
+                    WHERE venue = ? AND symbol = ? AND interval = ?
+                    """,
+                    (instrument.venue, instrument.symbol, interval),
+                ).fetchone()
+        return int(row[0])

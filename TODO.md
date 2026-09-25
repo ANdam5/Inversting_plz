@@ -21,11 +21,11 @@
 - [x] `(instrument, timeframe, timestamp)` 기준 중복 방지를 구현하고 같은 Bar 재저장을 테스트한다.
 - [x] OHLCV 수집 CLI를 추가하고 fake provider로 API→변환→저장 흐름을 end-to-end 테스트한다.
 - [x] CLI에서 실제 Upbit KRW-BTC 공개 데이터를 한 번 수집하는 opt-in integration test를 추가한다.
-- [ ] candle pagination을 구현하고 페이지 경계 누락·중복을 테스트한다.
-- [ ] 저장된 최신 timestamp 이후만 수집하고 중단 후 재실행을 테스트한다.
-- [ ] Upbit API 오류를 표준 provider 오류로 변환하고 timeout·429 응답을 테스트한다.
-- [ ] 중복·역순·비정상 OHLCV 데이터 검사를 구현하고 각각을 테스트한다.
-- [ ] 예상 구간의 결측 탐지를 구현하고 24/7 규칙 fixture로 테스트한다.
+- [x] candle pagination을 구현하고 페이지 경계 누락·중복을 테스트한다.
+- [x] 저장된 최신 timestamp 이후만 수집하고 중단 후 재실행을 테스트한다.
+- [x] Upbit API 오류를 표준 provider 오류로 변환하고 timeout·429 응답을 테스트한다.
+- [x] 중복·역순·비정상 OHLCV 데이터 검사를 구현하고 각각을 테스트한다.
+- [x] 예상 구간의 결측 탐지를 구현하고 24/7 규칙 fixture로 테스트한다.
 
 ## M2 — Strategy와 Risk
 

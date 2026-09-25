@@ -17,13 +17,14 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--timeframe", required=True, choices=["day"])
     collect.add_argument("--database", type=Path, default=Path("data/market.db"))
     collect.add_argument("--timeout", type=float, default=10.0)
+    collect.add_argument("--pages", type=int, default=1)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     instrument = Instrument(venue=args.venue, symbol=args.symbol)
-    provider = UpbitMarketDataProvider(timeout=args.timeout)
+    provider = UpbitMarketDataProvider(timeout=args.timeout, max_pages=args.pages)
     result = collect_bars(
         provider,
         SQLiteBarStore(args.database),
@@ -35,4 +36,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"total={result.total} database={args.database}"
     )
     return 0
-

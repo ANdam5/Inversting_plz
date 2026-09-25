@@ -7,10 +7,17 @@ from investing_plz.domain import Bar, Instrument
 
 
 class FakeProvider:
-    def __init__(self, *, timeout: float) -> None:
+    def __init__(self, *, timeout: float, max_pages: int) -> None:
         self.timeout = timeout
+        self.max_pages = max_pages
 
-    def get_bars(self, instrument: Instrument, interval: str) -> list[Bar]:
+    def get_bars(
+        self,
+        instrument: Instrument,
+        interval: str,
+        *,
+        since: datetime | None = None,
+    ) -> list[Bar]:
         return [
             Bar(
                 instrument=instrument,
@@ -45,4 +52,3 @@ def test_collect_cli_without_network(tmp_path, capsys) -> None:
     assert result == 0
     assert "fetched=1 inserted=1 total=1" in capsys.readouterr().out
     assert database.exists()
-
