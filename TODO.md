@@ -98,6 +98,12 @@
 
 ## M3-B2 — Performance Analysis
 
+- [x] closed Bar마다 close 기준 Equity Curve를 기록한다.
+- [x] Total Return을 Decimal 비율로 계산한다.
+- [x] Maximum Drawdown을 이전 최고점 대비 음수 비율로 계산한다.
+- [x] 실제 timestamp 기간과 365.25일 기준으로 CAGR을 계산한다.
+- [x] 초기 10% BTC와 90% 현금을 유지하는 Passive benchmark를 계산한다.
+- [x] 첫 open에서 전액 매수하는 BTC 100% Buy & Hold benchmark를 계산한다.
 - [ ] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
 - [ ] Broker protocol을 정의하고 메모리 fake로 주문·체결 contract를 테스트한다.
 - [ ] 평균단가와 실현 손익 계산을 구현하고 부분 매도를 테스트한다.

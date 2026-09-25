@@ -626,6 +626,25 @@ Bullish target adjustment는 사고 싶은 방향으로 목표에 접근하는 �
 
 이 비용 값은 실제 시장 비용을 자동으로 조회하거나 추정한 결과가 아니다. 사용자가 Backtest 가정으로 직접 지정하는 값이다.
 
+### Backtest 성과를 읽는 기본 지표
+
+- **Equity Curve**는 각 closed Bar의 close 시점에 가상 계좌 전체 가치가 어떻게 변했는지 기록한 흐름이다.
+- **Total Return**은 초기 자금 대비 마지막 계좌 가치의 전체 변화율이다. `0.16`은 전체 기간 약 16%를 뜻한다.
+- **CAGR**은 첫 Bar부터 마지막 Bar까지의 실제 기간을 연 단위로 환산한 연평균 복리 변화율이다.
+- **MDD(Maximum Drawdown)**는 이전 최고 계좌 가치에서 가장 크게 하락했던 비율이다. 이 프로젝트에서는 `-0.10`처럼 음수로 표시하며 이는 최대 약 10% 하락을 뜻한다.
+- **Passive 10%**는 첫 Bar open에서 자금의 10%만 BTC로 사고 나머지 90%는 현금으로 둔 비교 기준이다. 이후 BTC 비중이 변해도 다시 10%로 맞추지 않으므로, 현재 Strategy와 초기 노출만 비슷할 뿐 지속적인 10% 비중 유지 benchmark는 아니다.
+- **BTC 100% Buy & Hold**는 첫 Bar open에서 가능한 만큼 BTC를 한 번 사고 마지막 close까지 그대로 보유하는 비교 기준이다. 현재 Strategy보다 BTC 가격 위험에 훨씬 많이 노출된다.
+
+현재 약 5년 dataset과 `fee_rate=0.0005`, `slippage_bps=5` 가정에서 확인한 참고값은 다음과 같다.
+
+| 비교 대상 | 최종 가치 | Total Return | CAGR | MDD |
+|---|---:|---:|---:|---:|
+| MA Strategy 10% | 약 11,603,960원 | 약 16.04% | 약 2.76%/년 | 약 -4.76% |
+| Passive 10% | 약 10,556,083원 | 약 5.56% | 약 0.99%/년 | 약 -10.53% |
+| BTC 100% Buy & Hold | 약 15,560,827원 | 약 55.61% | 약 8.42%/년 | 약 -74.13% |
+
+이 값들은 특정 dataset과 비용 가정으로 계산한 과거 시뮬레이션 참고값이다. 데이터 기간, 비용, 규칙이 바뀌면 결과도 달라지며 실제 과거 결과가 미래 수익을 보장하지 않는다. 특히 100% BTC benchmark는 위험 노출이 달라 MA Strategy 10%와 같은 위험 수준의 직접 비교가 아니다.
+
 현재 가상 Portfolio는 `cash`와 `position_quantity`만 가진다. BUY Fill은 현금을 줄이고 수량을 늘리며, SELL Fill은 반대로 처리한다. 보유량보다 많이 팔 수 없다. 종료 시에는 `cash + position_quantity × latest_close`로 최종 가치를 계산한다.
 
 ```powershell
@@ -647,7 +666,7 @@ python -m investing_plz backtest `
   --min-cash-reserve 1000000
 ```
 
-이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. `fee_rate`와 `slippage_bps`의 기본값은 0이며, 평균단가, 실현손익, MDD 같은 성과 지표는 아직 없으므로 결과만 보고 Strategy가 좋다고 판단하면 안 된다.
+이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. `fee_rate`와 `slippage_bps`의 기본값은 0이다. 평균단가와 실현손익 같은 상세 회계는 아직 없으며, 과거 지표만 보고 Strategy가 좋다고 단정하면 안 된다.
 
 가상 체결 내역도 확인하려면 같은 명령 끝에 `--show-fills`를 붙인다.
 
@@ -917,7 +936,8 @@ tests/
 | M2-C1 | Basic Risk Manager | 완료 |
 | M2-C2 | 중복 미체결 주문과 운영 위험 | **아직 구현되지 않음** |
 | M3-A | 최소 결정론적 Backtest | 완료 |
-| M3-B | 수수료·slippage·상세 회계·성과 지표 | **아직 구현되지 않음** |
+| M3-B1 | 수수료·slippage 실행 비용 | 완료 |
+| M3-B2 | Equity Curve·Total Return·MDD·CAGR·Passive benchmark | 완료 |
 | M3-C | 실행 metadata·범용 architecture 강화 | **아직 구현되지 않음** |
 
 현재 저장소에는 Signal, Position sizing, OrderIntent, 기본 Risk 판단과 단일 종목 가상 Portfolio를 사용하는 최소 Backtest가 있다. 실제 Order, 미체결 주문 상태, Broker와 실제 계좌 Portfolio는 아직 없다.
