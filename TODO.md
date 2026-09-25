@@ -56,9 +56,8 @@
 - [x] `OrderIntent` 최소 모델을 정의하고 serialization round-trip을 테스트한다.
 - [x] 금융 가격·수량·금액은 Decimal을 사용하고 float 입력을 거부하는 기초 정책을 정의한다.
 
-## M2-B2-B — Parameter merge / Position sizing
+## M2-B2-B — Position sizing
 
-- [ ] instrument별 parameter 병합 우선순위를 구현하고 검증 실패를 테스트한다.
 - [x] 목표 비중을 OrderIntent 수량으로 변환하고 Decimal 내림을 테스트한다.
 - [x] BTC와 ETF profile에 같은 Strategy와 sizing 로직을 적용하고 서로 다른 수량을 테스트한다.
 
@@ -105,7 +104,13 @@
 - [x] 초기 10% BTC와 90% 현금을 유지하는 Passive benchmark를 계산한다.
 - [x] 첫 open에서 전액 매수하는 BTC 100% Buy & Hold benchmark를 계산한다.
 
-## M3-B3 — Portfolio Accounting / Trade Metrics
+## M3-B3 — Configuration Resolution
+
+- [x] instrument/profile/runtime parameter 병합 우선순위를 구현하고 검증 실패를 테스트한다.
+
+> 우선순위: default < instrument/profile < runtime override
+
+## M3-B4 — Portfolio Accounting / Trade Metrics
 
 - [ ] 평균단가와 실현 손익 계산을 구현하고 부분 매도를 테스트한다.
 - [ ] 미실현 손익 평가를 구현하고 quote currency 일관성을 테스트한다.

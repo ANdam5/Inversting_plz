@@ -4,8 +4,10 @@ from investing_plz.domain import Instrument
 from investing_plz.strategy import (
     MovingAverageCrossoverParameters,
     MovingAverageCrossoverStrategy,
+    MovingAverageParameterOverrides,
     StrategyProfile,
     create_strategy_from_profile,
+    resolve_moving_average_parameters,
 )
 
 
@@ -60,3 +62,90 @@ def test_profile_rejects_unknown_strategy_without_a_registry() -> None:
             strategy_id="not_implemented",
             parameters=MovingAverageCrossoverParameters(20, 60),
         )
+
+
+def test_parameter_resolution_uses_defaults_without_profile_or_overrides() -> None:
+    defaults = MovingAverageCrossoverParameters(20, 60)
+
+    assert resolve_moving_average_parameters(defaults) == defaults
+
+
+def test_profile_parameters_override_defaults() -> None:
+    defaults = MovingAverageCrossoverParameters(20, 60)
+    profile = make_profile("KRW-ETH", fast=15, slow=50)
+
+    resolved = resolve_moving_average_parameters(defaults, profile=profile)
+
+    assert resolved == MovingAverageCrossoverParameters(15, 50)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        (MovingAverageParameterOverrides(fast_window=10), (10, 50)),
+        (MovingAverageParameterOverrides(slow_window=80), (15, 80)),
+        (MovingAverageParameterOverrides(fast_window=10, slow_window=30), (10, 30)),
+    ],
+)
+def test_runtime_partial_overrides_take_priority_over_profile(
+    overrides: MovingAverageParameterOverrides,
+    expected: tuple[int, int],
+) -> None:
+    profile = make_profile("KRW-ETH", fast=15, slow=50)
+
+    resolved = resolve_moving_average_parameters(
+        MovingAverageCrossoverParameters(20, 60),
+        profile=profile,
+        runtime_overrides=overrides,
+    )
+
+    assert (resolved.fast_window, resolved.slow_window) == expected
+
+
+def test_btc_and_eth_use_the_same_parameter_resolution_logic() -> None:
+    defaults = MovingAverageCrossoverParameters(20, 60)
+    runtime_overrides = MovingAverageParameterOverrides(slow_window=80)
+
+    btc = resolve_moving_average_parameters(
+        defaults,
+        profile=make_profile("KRW-BTC", fast=20, slow=60),
+        runtime_overrides=runtime_overrides,
+    )
+    eth = resolve_moving_average_parameters(
+        defaults,
+        profile=make_profile("KRW-ETH", fast=15, slow=50),
+        runtime_overrides=runtime_overrides,
+    )
+
+    assert btc == MovingAverageCrossoverParameters(20, 80)
+    assert eth == MovingAverageCrossoverParameters(15, 80)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        MovingAverageParameterOverrides(fast_window=60),
+        MovingAverageParameterOverrides(fast_window=0),
+        MovingAverageParameterOverrides(fast_window=-1),
+        MovingAverageParameterOverrides(slow_window=0),
+        MovingAverageParameterOverrides(slow_window=-1),
+    ],
+)
+def test_parameter_resolution_reuses_final_parameter_validation(
+    overrides: MovingAverageParameterOverrides,
+) -> None:
+    with pytest.raises(ValueError):
+        resolve_moving_average_parameters(
+            MovingAverageCrossoverParameters(20, 50),
+            profile=make_profile("KRW-ETH", fast=15, slow=50),
+            runtime_overrides=overrides,
+        )
+
+
+def test_profile_strategy_creation_accepts_runtime_override() -> None:
+    strategy = create_strategy_from_profile(
+        make_profile("KRW-ETH", fast=15, slow=50),
+        runtime_overrides=MovingAverageParameterOverrides(slow_window=80),
+    )
+
+    assert (strategy.fast_window, strategy.slow_window) == (15, 80)
