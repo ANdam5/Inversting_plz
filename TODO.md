@@ -27,6 +27,14 @@
 - [x] 중복·역순·비정상 OHLCV 데이터 검사를 구현하고 각각을 테스트한다.
 - [x] 예상 구간의 결측 탐지를 구현하고 24/7 규칙 fixture로 테스트한다.
 
+## M1.5 — Backtest용 데이터셋 준비
+
+- [x] 고정된 현재 시각으로 24/7 일봉의 closed 상태를 판정하고 UTC 경계를 테스트한다.
+- [x] SQLite에서 완료된 Bar만 조회하고 진행 중 Bar 제외를 테스트한다.
+- [x] 기존 pagination CLI로 KRW-BTC 일봉 약 5년치를 수집한다.
+- [x] 데이터셋 row/closed/range/duplicate/gap summary를 구현하고 테스트한다.
+- [x] 데이터셋 summary CLI를 추가하고 출력 결과를 테스트한다.
+
 ## M2 — Strategy와 Risk
 
 - [ ] Strategy protocol을 정의하고 broker 의존성이 없는 fake Strategy로 테스트한다.
