@@ -18,6 +18,11 @@ from investing_plz.backtest.models import (
     Fill,
 )
 from investing_plz.backtest.runner import run_backtest
+from investing_plz.backtest.trade_metrics import (
+    TradeMetrics,
+    calculate_trade_metrics,
+    calculate_trade_return,
+)
 from investing_plz.backtest.trades import ClosedTrade, build_closed_trades
 
 __all__ = [
@@ -28,10 +33,13 @@ __all__ = [
     "EquityPoint",
     "Fill",
     "PassiveBenchmarkResult",
+    "TradeMetrics",
     "apply_slippage",
     "calculate_fee",
     "calculate_cagr",
     "calculate_max_drawdown",
+    "calculate_trade_metrics",
+    "calculate_trade_return",
     "calculate_total_return",
     "run_backtest",
     "run_passive_benchmark",
