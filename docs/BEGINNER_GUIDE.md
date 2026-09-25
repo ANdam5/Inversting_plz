@@ -608,6 +608,20 @@ Simulated Fill
 
 Bar T의 종가는 하루가 끝나야 알 수 있으므로, 그 종가로 만든 Signal을 같은 Bar의 open이나 close에 체결하지 않는다. Signal은 다음 Bar까지 기다리고, T+1 open 가격으로 sizing과 Risk 검사를 한 뒤 같은 가격으로 Fill한다. 마지막 Bar에서 생긴 Signal은 다음 Bar가 없으므로 체결되지 않는다.
 
+Backtest에서 Signal은 한 번의 주문 지시가 아니라 **목표 상태를 바꾸는 사건**으로 사용된다.
+
+```text
+bullish crossover → 설정된 목표 비중(예: BTC 10%)으로 변경
+neutral           → 기존 목표를 그대로 유지
+bearish crossover → 목표 비중 0%로 변경
+```
+
+`max_order_amount`는 총 목표 포지션이 아니라 **한 번에 허용할 주문 크기**다. 목표 BTC 가치가 100만원이고 한 번 주문 한도가 50만원이면 첫 open에서 약 50만원을 사고, Risk 결과가 ADJUSTED이므로 다음 Bar open에서 남은 목표분을 다시 계산한다. APPROVED되어 목표 조정이 끝나면 pending 상태를 종료하므로 이후 가격만 움직였다는 이유로 매일 10%에 다시 맞추지는 않는다. REJECTED되거나 반올림 후 Intent가 없을 때도 자동 재시도를 끝낸다.
+
+Bullish target adjustment는 사고 싶은 방향으로 목표에 접근하는 과정이다. 진행 중 가격이 올라 목표를 조금 초과해 계산상 SELL이 필요해져도 반대 방향으로 미세 조정하지 않고 진입을 완료한 것으로 처리한다. Bearish는 반대로 보유 수량을 0으로 만드는 청산 과정이므로 SELL만 허용한다.
+
+`min_trade_amount`는 목표와의 차이가 너무 작을 때 의미 없는 소액 BUY를 만들지 않기 위한 Backtest 운영 기준이다. 예를 들어 남은 BUY 필요 금액이 3원이고 최소 주문 기준이 10,000원이면 추가 주문 없이 진입을 끝낸다. 이는 Upbit의 공식 최소 주문 금액이나 추천 설정이 아니다. Bearish 청산 SELL은 작은 잔여 포지션을 영구히 남기지 않도록 이 기준보다 작아도 전량 청산한다.
+
 현재 가상 Portfolio는 `cash`와 `position_quantity`만 가진다. BUY Fill은 현금을 줄이고 수량을 늘리며, SELL Fill은 반대로 처리한다. 보유량보다 많이 팔 수 없다. 종료 시에는 `cash + position_quantity × latest_close`로 최종 가치를 계산한다.
 
 ```powershell
@@ -621,6 +635,7 @@ python -m investing_plz backtest `
   --initial-cash 10000000 `
   --target-weight 0.10 `
   --quantity-step 0.00000001 `
+  --min-trade-amount 10000 `
   --max-order-amount 500000 `
   --max-instrument-weight 0.20 `
   --min-cash-reserve 1000000

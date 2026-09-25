@@ -10,9 +10,9 @@ from investing_plz.backtest.models import (
     BacktestResult,
     Fill,
 )
-from investing_plz.domain import Bar
+from investing_plz.domain import Bar, OrderSide
 from investing_plz.risk import BasicRiskManager, RiskContext, RiskStatus
-from investing_plz.strategy import MovingAverageCrossoverStrategy, Signal, SignalType
+from investing_plz.strategy import MovingAverageCrossoverStrategy, SignalType
 
 
 def run_backtest(
@@ -25,62 +25,72 @@ def run_backtest(
     _validate_bars(bars)
     portfolio = BacktestPortfolio(cash=config.initial_cash)
     risk_manager = BasicRiskManager()
-    pending_signal: Signal | None = None
+    desired_target_weight = Decimal("0")
+    rebalance_pending = False
+    pending_direction: OrderSide | None = None
+    target_strategy_id = strategy.strategy_id
     fills: list[Fill] = []
     signal_count = bullish_count = bearish_count = 0
     intent_count = approved_count = adjusted_count = rejected_count = 0
 
     for index, bar in enumerate(bars):
-        if pending_signal is not None:
-            target_weight = (
-                config.target_weight
-                if pending_signal.signal_type is SignalType.BULLISH_CROSSOVER
-                else Decimal("0")
-            )
+        if rebalance_pending:
             portfolio_value = portfolio.value_at(bar.open)
             intent = create_target_weight_order_intent(
                 instrument=bar.instrument,
                 timestamp=bar.timestamp,
-                strategy_id=pending_signal.strategy_id,
-                target_weight=target_weight,
+                strategy_id=target_strategy_id,
+                target_weight=desired_target_weight,
                 portfolio_value=portfolio_value,
                 current_price=bar.open,
                 current_quantity=portfolio.position_quantity,
                 quantity_step=config.quantity_step,
             )
-            if intent is not None:
+            if intent is None:
+                rebalance_pending = False
+            else:
                 intent_count += 1
-                decision = risk_manager.evaluate(
-                    intent,
-                    RiskContext(
-                        portfolio_value=portfolio_value,
-                        available_cash=portfolio.cash,
-                        current_position_value=portfolio.position_quantity * bar.open,
-                        current_price=bar.open,
-                        quantity_step=config.quantity_step,
-                    ),
-                    config.risk_limits,
-                )
-                if decision.status is RiskStatus.APPROVED:
-                    approved_count += 1
-                elif decision.status is RiskStatus.ADJUSTED:
-                    adjusted_count += 1
+                if intent.side is not pending_direction:
+                    rebalance_pending = False
+                elif (
+                    pending_direction is OrderSide.BUY
+                    and intent.quantity * bar.open < config.min_trade_amount
+                ):
+                    rebalance_pending = False
                 else:
-                    rejected_count += 1
-
-                if decision.approved_intent is not None:
-                    approved_intent = decision.approved_intent
-                    fill = Fill(
-                        instrument=approved_intent.instrument,
-                        timestamp=bar.timestamp,
-                        side=approved_intent.side,
-                        quantity=approved_intent.quantity,
-                        fill_price=bar.open,
-                        strategy_id=approved_intent.strategy_id,
+                    decision = risk_manager.evaluate(
+                        intent,
+                        RiskContext(
+                            portfolio_value=portfolio_value,
+                            available_cash=portfolio.cash,
+                            current_position_value=portfolio.position_quantity * bar.open,
+                            current_price=bar.open,
+                            quantity_step=config.quantity_step,
+                        ),
+                        config.risk_limits,
                     )
-                    portfolio = portfolio.apply(fill)
-                    fills.append(fill)
-            pending_signal = None
+                    if decision.status is RiskStatus.APPROVED:
+                        approved_count += 1
+                        rebalance_pending = False
+                    elif decision.status is RiskStatus.ADJUSTED:
+                        adjusted_count += 1
+                        rebalance_pending = True
+                    else:
+                        rejected_count += 1
+                        rebalance_pending = False
+
+                    if decision.approved_intent is not None:
+                        approved_intent = decision.approved_intent
+                        fill = Fill(
+                            instrument=approved_intent.instrument,
+                            timestamp=bar.timestamp,
+                            side=approved_intent.side,
+                            quantity=approved_intent.quantity,
+                            fill_price=bar.open,
+                            strategy_id=approved_intent.strategy_id,
+                        )
+                        portfolio = portfolio.apply(fill)
+                        fills.append(fill)
 
         history = bars[: index + 1]
         if len(history) < strategy.minimum_bars:
@@ -89,10 +99,16 @@ def run_backtest(
         signal_count += 1
         if signal.signal_type is SignalType.BULLISH_CROSSOVER:
             bullish_count += 1
-            pending_signal = signal
+            desired_target_weight = config.target_weight
+            rebalance_pending = True
+            pending_direction = OrderSide.BUY
+            target_strategy_id = signal.strategy_id
         elif signal.signal_type is SignalType.BEARISH_CROSSOVER:
             bearish_count += 1
-            pending_signal = signal
+            desired_target_weight = Decimal("0")
+            rebalance_pending = True
+            pending_direction = OrderSide.SELL
+            target_strategy_id = signal.strategy_id
 
     final_price = bars[-1].close
     final_market_value = portfolio.position_quantity * final_price

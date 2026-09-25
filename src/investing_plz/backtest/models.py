@@ -79,17 +79,21 @@ class BacktestConfig:
     target_weight: Decimal
     quantity_step: Decimal
     risk_limits: RiskLimits
+    min_trade_amount: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         require_decimal(self.initial_cash, name="initial_cash")
         require_decimal(self.target_weight, name="target_weight")
         require_decimal(self.quantity_step, name="quantity_step")
+        require_decimal(self.min_trade_amount, name="min_trade_amount")
         if self.initial_cash < 0:
             raise ValueError("initial_cash must not be negative")
         if not Decimal("0") <= self.target_weight <= Decimal("1"):
             raise ValueError("target_weight must be between 0 and 1")
         if self.quantity_step <= 0:
             raise ValueError("quantity_step must be greater than zero")
+        if self.min_trade_amount < 0:
+            raise ValueError("min_trade_amount must not be negative")
         if not isinstance(self.risk_limits, RiskLimits):
             raise TypeError("risk_limits must be RiskLimits")
 

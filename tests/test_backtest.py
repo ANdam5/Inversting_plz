@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
 
@@ -9,7 +10,8 @@ from investing_plz.backtest import (
     Fill,
     run_backtest,
 )
-from investing_plz.domain import Bar, Instrument, OrderSide
+from investing_plz.application.position_sizing import create_target_weight_order_intent
+from investing_plz.domain import Bar, Instrument, OrderIntent, OrderSide
 from investing_plz.risk import RiskLimits
 from investing_plz.strategy import MovingAverageCrossoverStrategy
 
@@ -137,6 +139,208 @@ def test_risk_adjusted_fills_reduced_quantity() -> None:
 
     assert result.adjusted_count == 1
     assert result.fills[0].quantity == Decimal("2")
+
+
+def test_adjusted_rebalance_continues_once_then_stops_after_approval() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "5", "6", "7"],
+        opens={4: "100", 5: "100", 6: "200"},
+    )
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("300"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("0"),
+            )
+        ),
+    )
+
+    assert result.adjusted_count == 1
+    assert result.approved_count == 1
+    assert [fill.quantity for fill in result.fills] == [Decimal("3"), Decimal("2")]
+    assert [fill.timestamp for fill in result.fills] == [bars[4].timestamp, bars[5].timestamp]
+    assert result.fill_count == 2
+    assert result.intent_count == 2
+
+
+def test_rejected_rebalance_is_not_retried_on_neutral_bars() -> None:
+    result = run_backtest(
+        bars_from_closes(["3", "2", "1", "4", "5", "6", "7"]),
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("10000"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("1000"),
+            )
+        ),
+    )
+
+    assert result.rejected_count == 1
+    assert result.intent_count == 1
+    assert result.fill_count == 0
+
+
+def test_no_intent_completes_pending_target_without_retries() -> None:
+    result = run_backtest(
+        bars_from_closes(["3", "2", "1", "4", "5", "6", "7"]),
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(target_weight=Decimal("0")),
+    )
+
+    assert result.bullish_signal_count == 1
+    assert result.intent_count == 0
+    assert result.fill_count == 0
+
+
+def test_new_bearish_signal_replaces_pending_bullish_target() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "0", "0", "1"],
+        opens={4: "100", 5: "100", 6: "100"},
+    )
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("100"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("0"),
+            )
+        ),
+    )
+
+    assert [fill.side for fill in result.fills] == [
+        OrderSide.BUY,
+        OrderSide.BUY,
+        OrderSide.SELL,
+    ]
+    assert [fill.quantity for fill in result.fills] == [
+        Decimal("1"),
+        Decimal("1"),
+        Decimal("2"),
+    ]
+    assert result.final_position_quantity == Decimal("0")
+
+
+def test_bullish_pending_stops_instead_of_selling_after_overshoot() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "5", "6", "7"],
+        opens={4: "100", 5: "100", 6: "200"},
+    )
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            quantity_step=Decimal("0.1"),
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("200"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("0"),
+            ),
+        ),
+    )
+
+    assert [fill.side for fill in result.fills] == [OrderSide.BUY, OrderSide.BUY]
+    assert result.intent_count == 3
+    assert result.fill_count == 2
+
+
+def test_small_buy_is_skipped_and_zero_threshold_preserves_it() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "5", "6", "7"],
+        opens={4: "100", 5: "100", 6: "100"},
+    )
+    limits = RiskLimits(
+        max_order_amount=Decimal("249"),
+        max_instrument_weight=Decimal("1"),
+        min_cash_reserve=Decimal("0"),
+    )
+    strategy = MovingAverageCrossoverStrategy(fast_window=2, slow_window=3)
+
+    filtered = run_backtest(
+        bars,
+        strategy,
+        config(
+            quantity_step=Decimal("0.01"),
+            min_trade_amount=Decimal("10"),
+            risk_limits=limits,
+        ),
+    )
+    compatible = run_backtest(
+        bars,
+        strategy,
+        config(
+            quantity_step=Decimal("0.01"),
+            min_trade_amount=Decimal("0"),
+            risk_limits=limits,
+        ),
+    )
+
+    assert [fill.quantity for fill in filtered.fills] == [Decimal("2.49"), Decimal("2.49")]
+    assert [fill.quantity for fill in compatible.fills] == [
+        Decimal("2.49"),
+        Decimal("2.49"),
+        Decimal("0.02"),
+    ]
+    assert filtered.intent_count == 3
+    assert filtered.adjusted_count == 2
+
+
+def test_small_bearish_liquidation_sell_is_allowed() -> None:
+    result = run_backtest(
+        bars_from_closes(
+            ["3", "2", "1", "4", "0", "0", "1"],
+            opens={4: "100", 6: "1"},
+        ),
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(min_trade_amount=Decimal("10")),
+    )
+
+    assert result.fills[-1].side is OrderSide.SELL
+    assert result.fills[-1].quantity * result.fills[-1].fill_price == Decimal("5")
+    assert result.final_position_quantity == Decimal("0")
+
+
+def test_bearish_pending_stops_if_sizing_returns_buy() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "0", "0", "1"],
+        opens={4: "100", 6: "80"},
+    )
+
+    def sizing_with_wrong_bearish_direction(**kwargs):
+        if kwargs["timestamp"] == bars[6].timestamp:
+            return OrderIntent(
+                instrument=kwargs["instrument"],
+                timestamp=kwargs["timestamp"],
+                strategy_id=kwargs["strategy_id"],
+                side=OrderSide.BUY,
+                quantity=Decimal("1"),
+            )
+        return create_target_weight_order_intent(**kwargs)
+
+    with patch(
+        "investing_plz.backtest.runner.create_target_weight_order_intent",
+        side_effect=sizing_with_wrong_bearish_direction,
+    ):
+        result = run_backtest(
+            bars,
+            MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+            config(),
+        )
+
+    assert [fill.side for fill in result.fills] == [OrderSide.BUY]
+    assert result.intent_count == 2
+
+
+@pytest.mark.parametrize("value", [Decimal("-1"), -1.0])
+def test_invalid_min_trade_amount_is_rejected(value) -> None:
+    expected = ValueError if isinstance(value, Decimal) else TypeError
+    with pytest.raises(expected):
+        config(min_trade_amount=value)
 
 
 def test_risk_rejected_creates_no_fill() -> None:

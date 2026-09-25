@@ -43,6 +43,7 @@ def _run_backtest_cli(database, *, show_fills: bool) -> int:
         "--initial-cash", "1000",
         "--target-weight", "0.5",
         "--quantity-step", "1",
+        "--min-trade-amount", "10",
         "--max-order-amount", "10000",
         "--max-instrument-weight", "1",
         "--min-cash-reserve", "0",

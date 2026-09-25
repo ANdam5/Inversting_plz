@@ -64,6 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-cash-reserve", type=Decimal, default=Decimal("1000000")
     )
     backtest.add_argument(
+        "--min-trade-amount", type=Decimal, default=Decimal("0")
+    )
+    backtest.add_argument(
         "--show-fills",
         action="store_true",
         help="print simulated fill details after the summary",
@@ -142,6 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 initial_cash=args.initial_cash,
                 target_weight=args.target_weight,
                 quantity_step=args.quantity_step,
+                min_trade_amount=args.min_trade_amount,
                 risk_limits=RiskLimits(
                     max_order_amount=args.max_order_amount,
                     max_instrument_weight=args.max_instrument_weight,

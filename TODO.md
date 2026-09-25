@@ -80,6 +80,11 @@
 - [x] 기존 Position sizing과 `BasicRiskManager`를 Backtest에서 재사용한다.
 - [x] backtest CLI를 추가하고 작은 SQLite fixture로 end-to-end 테스트한다.
 - [x] optional CLI fill detail output을 추가하고 출력 순서·금액을 테스트한다.
+- [x] Strategy Signal이 desired target state를 변경하도록 처리한다.
+- [x] Risk ADJUSTED 시 다음 Bar에서 남은 target adjustment를 이어서 수행한다.
+- [x] target 완료 후 neutral Bar에서 continuous rebalance하지 않음을 테스트한다.
+- [x] target adjustment 중 반대 방향 미세조정 주문을 방지한다.
+- [x] 최소 주문 금액으로 초소액 BUY target adjustment를 종료한다.
 
 ## M3-B — Fee / Slippage / Portfolio accounting / Metrics
 
