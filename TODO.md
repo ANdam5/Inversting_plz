@@ -62,13 +62,16 @@
 - [x] 목표 비중을 OrderIntent 수량으로 변환하고 Decimal 내림을 테스트한다.
 - [x] BTC와 ETF profile에 같은 Strategy와 sizing 로직을 적용하고 서로 다른 수량을 테스트한다.
 
-## M2-C — Risk Manager
+## M2-C1 — Basic Risk Manager
 
-- [ ] Risk Manager protocol을 정의하고 승인·거부 결과를 테스트한다.
-- [ ] 최대 단일 종목 비중 규칙을 구현하고 축소/거부를 테스트한다.
-- [ ] 최소 현금 보유 규칙을 구현하고 주문 축소를 테스트한다.
-- [ ] 최대 주문 금액 규칙을 구현하고 경계값을 테스트한다.
-- [ ] 중복 미체결 주문 차단 규칙을 구현하고 동일 intent 재처리를 테스트한다.
+- [x] Risk Manager protocol과 APPROVED/ADJUSTED/REJECTED 결과를 정의한다.
+- [x] 최대 단일 종목 비중 규칙을 구현하고 축소/거부를 테스트한다.
+- [x] 최소 현금 보유 규칙을 구현하고 주문 축소를 테스트한다.
+- [x] 최대 단일 주문 금액 규칙을 구현하고 경계값을 테스트한다.
+
+## M2-C2 — Pending order / operating risk
+
+- [ ] Order 상태 모델이 생긴 뒤 중복 미체결 주문 차단과 동일 intent 재처리를 테스트한다.
 
 ## M3 — Backtest와 Portfolio
 

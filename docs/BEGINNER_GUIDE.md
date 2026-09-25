@@ -76,7 +76,8 @@ Inversting_plz/
 │  │  └─ upbit.py                 # Upbit HTTP 요청과 응답→Bar 변환
 │  ├─ application/
 │  │  ├─ __init__.py              # application 패키지 표시
-│  │  └─ collect.py               # 데이터 수집 전체 순서를 조정
+│  │  ├─ collect.py               # 데이터 수집 전체 순서를 조정
+│  │  └─ position_sizing.py       # 목표 비중을 OrderIntent 수량으로 변환
 │  ├─ domain/
 │  │  ├─ __init__.py              # 주요 domain 모델 공개
 │  │  ├─ instrument.py            # 거래소와 종목을 나타내는 Instrument
@@ -96,6 +97,11 @@ Inversting_plz/
 │     ├─ protocol.py              # Strategy가 따라야 하는 최소 약속
 │     ├─ signal.py                # Signal과 bullish/bearish/neutral 유형
 │     └─ moving_average_crossover.py # MA 교차 규칙과 계산 결과
+│  ├─ risk/
+│  │  ├─ __init__.py              # Risk 관련 공개 이름 모음
+│  │  ├─ models.py                # Context, Limits, Decision 모델
+│  │  ├─ protocol.py              # Risk Manager 최소 계약
+│  │  └─ manager.py               # 세 가지 기본 BUY 위험 제한
 │  └─ storage/
 │     ├─ __init__.py              # storage 패키지와 SQLiteBarStore 공개
 │     └─ sqlite.py                # SQLite 생성·저장·조회·summary
@@ -340,7 +346,7 @@ Signal은 Strategy의 판단 결과이며 실제 주문이 아니다. 현재 Sig
 - **Instrument**는 무엇을 분석하거나 투자할지 나타낸다. 예: `upbit:KRW-BTC`, `upbit:KRW-ETH`, 향후 `stock:SPY`.
 - **Strategy**는 어떤 규칙으로 판단할지 나타낸다. 현재 구현된 것은 `MovingAverageCrossoverStrategy` 하나뿐이다.
 - **Parameter**는 같은 Strategy를 어떤 설정으로 사용할지 나타낸다. 여기서는 `fast_window`와 `slow_window`다.
-- **Risk**는 Signal이 생겼을 때 실제로 얼마를 투자할지 정하는 영역이며 아직 구현되지 않았다.
+- **Risk**는 만들어진 OrderIntent가 운영 안전 한도 안에 있는지 검사하는 영역이다. 현재 기본 세 규칙만 구현되어 있다.
 - **Profile**은 특정 Instrument에 어떤 Strategy와 Parameter를 사용할지 한데 묶은 설정이다.
 
 따라서 Strategy 내부에서 종목 이름을 보고 규칙을 바꾸지 않는다. 사용자가 같은 Strategy class에 서로 다른 Instrument의 Bar와 서로 다른 parameter를 전달한다.
@@ -405,7 +411,7 @@ OrderIntent
   → 계산 결과 만들어진 내부 주문 후보
 
 Risk Manager
-  → 주문 후보가 안전한지 검사 (아직 구현되지 않음)
+  → 주문 후보가 안전한지 검사하고 승인·축소·거부
 
 Order
   → Broker로 제출되는 실제 주문 (아직 구현되지 않음)
@@ -458,10 +464,37 @@ Position sizing
   ↓
 OrderIntent
   ↓
-Risk Manager  (아직 미구현)
+Risk Manager
+  ↓
+APPROVED / ADJUSTED / REJECTED
   ↓
 Order         (아직 미구현)
 ```
+
+### Basic Risk Manager
+
+Risk Manager는 OrderIntent를 실제 주문으로 보내기 전에 운영자가 정한 안전 한도를 검사한다. 현재는 실제 Order가 없으므로 검사 결과까지만 만들며 Upbit 주문은 발생하지 않는다.
+
+```text
+OrderIntent: "BUY 0.01 BTC를 원함"
+  ↓
+BasicRiskManager
+  ├─ 최대 주문 금액 검사
+  ├─ 최대 종목 비중 검사
+  └─ 최소 현금 보유 검사
+  ↓
+APPROVED / ADJUSTED / REJECTED
+  ↓
+Order  (아직 미구현)
+```
+
+- **APPROVED**: 원래 Intent를 그대로 허용한다.
+- **ADJUSTED**: 안전 한도 안으로 수량을 줄여 허용한다.
+- **REJECTED**: 허용할 수 있는 수량이 없어 거부한다.
+
+예를 들어 `BUY 0.01 BTC`가 100만원이지만 최대 주문 금액이 50만원이면 `BUY 0.005 BTC`로 ADJUSTED된다. 여러 한도가 동시에 적용되면 허용 금액이 가장 작은 제한을 사용하므로 규칙 검사 순서에 따라 결과가 바뀌지 않는다.
+
+Risk 계산에는 portfolio value, available cash, 현재 종목 가치, 현재 가격, 수량 단위를 직접 전달한다. 아직 Portfolio class나 실제 잔고 조회는 없다. SELL은 long 포지션을 줄이는 방향이므로 BUY용 현금·노출 한도로 막지 않는다.
 
 ### 금융 값에 Decimal을 사용하는 이유
 
@@ -574,6 +607,7 @@ python -m pytest -q
 | `test_strategy_profile.py` | BTC/ETH Profile, Strategy 생성, fast/slow parameter 검증 |
 | `test_order_intent.py` | BUY/SELL Intent, Decimal·UTC 검증과 JSON round-trip |
 | `test_position_sizing.py` | 목표 비중 수량, BUY/SELL, 내림, 입력 검증, BTC/ETF 재사용 |
+| `test_risk_manager.py` | 승인·축소·거부, 주문금액·종목비중·현금 한도와 SELL 처리 |
 | `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
@@ -785,10 +819,11 @@ tests/
 | M2-B1 | Instrument별 Strategy Profile | 완료 |
 | M2-B2-A | OrderIntent와 Decimal 기초 | 완료 |
 | M2-B2-B | Position sizing과 BTC/ETF 재사용 | 부분 완료 |
-| M2-C | Risk Manager | **아직 구현되지 않음** |
+| M2-C1 | Basic Risk Manager | 완료 |
+| M2-C2 | 중복 미체결 주문과 운영 위험 | **아직 구현되지 않음** |
 | M3 | Backtest | **아직 구현되지 않음** |
 
-현재 저장소에는 최초 baseline Strategy와 Signal까지만 있다. OrderIntent, 주문 수량, Risk Manager와 주문 로직은 없으며 M3의 백테스트 엔진도 아직 없다.
+현재 저장소에는 Signal, Position sizing, OrderIntent와 기본 Risk 판단까지 있다. 실제 Order, 미체결 주문 상태, Broker, Portfolio와 M3 백테스트 엔진은 아직 없다.
 
 ## 17. 초보자가 지금 이해하면 충분한 것
 

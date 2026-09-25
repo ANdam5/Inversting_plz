@@ -1,8 +1,8 @@
 from datetime import datetime
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 
 from investing_plz.domain import Instrument, OrderIntent, OrderSide
-from investing_plz.domain.decimal import require_decimal
+from investing_plz.domain.decimal import require_decimal, round_down_to_step
 from investing_plz.domain.time import require_utc
 
 
@@ -45,7 +45,7 @@ def create_target_weight_order_intent(
     target_value = portfolio_value * target_weight
     target_quantity = target_value / current_price
     difference = target_quantity - current_quantity
-    quantity = _round_down_to_step(abs(difference), quantity_step)
+    quantity = round_down_to_step(abs(difference), quantity_step)
     if quantity == 0:
         return None
 
@@ -57,9 +57,3 @@ def create_target_weight_order_intent(
         side=side,
         quantity=quantity,
     )
-
-
-def _round_down_to_step(quantity: Decimal, step: Decimal) -> Decimal:
-    units = (quantity / step).to_integral_value(rounding=ROUND_DOWN)
-    return units * step
-
