@@ -104,26 +104,28 @@
 - [x] 실제 timestamp 기간과 365.25일 기준으로 CAGR을 계산한다.
 - [x] 초기 10% BTC와 90% 현금을 유지하는 Passive benchmark를 계산한다.
 - [x] 첫 open에서 전액 매수하는 BTC 100% Buy & Hold benchmark를 계산한다.
-- [ ] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
-- [ ] Broker protocol을 정의하고 메모리 fake로 주문·체결 contract를 테스트한다.
+
+## M3-B3 — Portfolio Accounting / Trade Metrics
+
 - [ ] 평균단가와 실현 손익 계산을 구현하고 부분 매도를 테스트한다.
 - [ ] 미실현 손익 평가를 구현하고 quote currency 일관성을 테스트한다.
-- [ ] 수수료 모델 port를 구현하고 Upbit fee fixture를 테스트한다.
-- [ ] slippage 모델 port를 구현하고 0/고정 slippage를 테스트한다.
-- [ ] simulated broker 주문 생명주기를 구현하고 contract suite를 통과시킨다.
-- [ ] 거래·수익률·drawdown 지표를 각각 고정 원장으로 테스트한다.
+- [ ] 거래별 성과 지표를 고정 원장으로 테스트한다.
 
-## M3-C — Metadata / reproducibility / architecture 강화
+## M3-C — Backtest Metadata / Reproducibility
 
-- [ ] Clock protocol과 fixed clock을 정의하고 시간 결정론을 테스트한다.
-- [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
 - [ ] backtest run metadata에 코드/전략/파라미터/데이터 버전을 기록하고 round-trip을 테스트한다.
-- [ ] 동일 seed와 입력의 backtest 결과 재현성을 테스트한다.
+- [ ] 동일 dataset과 동일 configuration에서 동일 fingerprint와 backtest 결과가 생성되는지 테스트한다.
 
 ## M4 — Paper Trading
 
+- [ ] Clock protocol과 fixed clock을 정의하고 시간 결정론을 테스트한다.
 - [ ] real clock과 polling scheduler를 구현하고 fake clock으로 주기를 테스트한다.
-- [ ] paper broker를 구현하고 Broker contract suite를 통과시킨다.
+- [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
+- [ ] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
+- [ ] Broker protocol을 정의하고 메모리 fake로 주문·체결 contract를 테스트한다.
+- [ ] 수수료 모델 port를 구현하고 Upbit fee fixture를 테스트한다.
+- [ ] slippage 모델 port를 구현하고 0/고정 slippage를 테스트한다.
+- [ ] paper broker와 simulated 주문 생명주기를 구현하고 Broker contract suite를 통과시킨다.
 - [ ] 주문 idempotency key 생성을 구현하고 재처리 시 동일 키를 테스트한다.
 - [ ] 동일 Intent 재처리 및 중복 미체결 주문 제출 차단을 테스트한다.
 - [ ] 주문·체결 이벤트 영속화를 구현하고 재시작 복구를 테스트한다.
