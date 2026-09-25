@@ -177,6 +177,8 @@ def run_backtest(
         rejected_count=rejected_count,
         fills=tuple(fills),
         equity_curve=tuple(equity_curve),
+        final_average_cost=portfolio.average_cost,
+        cumulative_realized_pnl=portfolio.realized_pnl,
     )
 
 

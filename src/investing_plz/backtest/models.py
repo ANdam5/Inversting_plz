@@ -46,18 +46,24 @@ class Fill:
 
 @dataclass(frozen=True, slots=True)
 class BacktestPortfolio:
-    """The cash and one long position needed by the M3-A backtest."""
+    """Cash, one long position, and its average-cost accounting state."""
 
     cash: Decimal
     position_quantity: Decimal = Decimal("0")
+    average_cost: Decimal = Decimal("0")
+    realized_pnl: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         require_decimal(self.cash, name="cash")
         require_decimal(self.position_quantity, name="position_quantity")
+        require_decimal(self.average_cost, name="average_cost")
+        require_decimal(self.realized_pnl, name="realized_pnl")
         if self.cash < 0:
             raise ValueError("cash must not be negative")
         if self.position_quantity < 0:
             raise ValueError("position_quantity must not be negative")
+        if self.average_cost < 0:
+            raise ValueError("average_cost must not be negative")
 
     def value_at(self, price: Decimal) -> Decimal:
         price = require_decimal(price, name="price")
@@ -71,15 +77,26 @@ class BacktestPortfolio:
             cash_outflow = amount + fill.fee_amount
             if cash_outflow > self.cash:
                 raise ValueError("BUY fill amount exceeds available cash")
+            new_quantity = self.position_quantity + fill.quantity
+            existing_cost = self.position_quantity * self.average_cost
             return BacktestPortfolio(
                 cash=self.cash - cash_outflow,
-                position_quantity=self.position_quantity + fill.quantity,
+                position_quantity=new_quantity,
+                average_cost=(existing_cost + cash_outflow) / new_quantity,
+                realized_pnl=self.realized_pnl,
             )
         if fill.quantity > self.position_quantity:
             raise ValueError("SELL fill quantity exceeds the current position")
+        remaining_quantity = self.position_quantity - fill.quantity
+        net_proceeds = amount - fill.fee_amount
+        realized_for_fill = net_proceeds - fill.quantity * self.average_cost
         return BacktestPortfolio(
-            cash=self.cash + amount - fill.fee_amount,
-            position_quantity=self.position_quantity - fill.quantity,
+            cash=self.cash + net_proceeds,
+            position_quantity=remaining_quantity,
+            average_cost=(
+                Decimal("0") if remaining_quantity == 0 else self.average_cost
+            ),
+            realized_pnl=self.realized_pnl + realized_for_fill,
         )
 
 
@@ -144,6 +161,8 @@ class BacktestResult:
     rejected_count: int
     fills: tuple[Fill, ...]
     equity_curve: tuple[EquityPoint, ...] = ()
+    final_average_cost: Decimal = Decimal("0")
+    cumulative_realized_pnl: Decimal = Decimal("0")
 
     @property
     def fill_count(self) -> int:

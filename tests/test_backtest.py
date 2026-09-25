@@ -478,12 +478,21 @@ def test_portfolio_buy_and_sell_updates_cash_and_quantity() -> None:
     portfolio = portfolio.apply(
         Fill(INSTRUMENT, timestamp, OrderSide.BUY, Decimal("5"), Decimal("100"), "test")
     )
-    assert portfolio == BacktestPortfolio(cash=Decimal("500"), position_quantity=Decimal("5"))
+    assert portfolio == BacktestPortfolio(
+        cash=Decimal("500"),
+        position_quantity=Decimal("5"),
+        average_cost=Decimal("100"),
+    )
 
     portfolio = portfolio.apply(
         Fill(INSTRUMENT, timestamp, OrderSide.SELL, Decimal("2"), Decimal("120"), "test")
     )
-    assert portfolio == BacktestPortfolio(cash=Decimal("740"), position_quantity=Decimal("3"))
+    assert portfolio == BacktestPortfolio(
+        cash=Decimal("740"),
+        position_quantity=Decimal("3"),
+        average_cost=Decimal("100"),
+        realized_pnl=Decimal("40"),
+    )
 
 
 def test_portfolio_prevents_selling_more_than_is_held() -> None:
