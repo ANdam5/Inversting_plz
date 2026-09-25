@@ -18,11 +18,13 @@ from investing_plz.backtest.models import (
     Fill,
 )
 from investing_plz.backtest.runner import run_backtest
+from investing_plz.backtest.trades import ClosedTrade, build_closed_trades
 
 __all__ = [
     "BacktestConfig",
     "BacktestPortfolio",
     "BacktestResult",
+    "ClosedTrade",
     "EquityPoint",
     "Fill",
     "PassiveBenchmarkResult",
@@ -33,4 +35,5 @@ __all__ = [
     "calculate_total_return",
     "run_backtest",
     "run_passive_benchmark",
+    "build_closed_trades",
 ]
