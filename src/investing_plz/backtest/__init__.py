@@ -1,5 +1,9 @@
 """Deterministic historical replay for the minimal backtest baseline."""
 
+from investing_plz.backtest.benchmark import (
+    PassiveBenchmarkResult,
+    run_passive_benchmark,
+)
 from investing_plz.backtest.costs import apply_slippage, calculate_fee
 from investing_plz.backtest.metrics import (
     calculate_cagr,
@@ -21,10 +25,12 @@ __all__ = [
     "BacktestResult",
     "EquityPoint",
     "Fill",
+    "PassiveBenchmarkResult",
     "apply_slippage",
     "calculate_fee",
     "calculate_cagr",
     "calculate_max_drawdown",
     "calculate_total_return",
     "run_backtest",
+    "run_passive_benchmark",
 ]
