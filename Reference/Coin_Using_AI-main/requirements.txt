@@ -1,0 +1,16 @@
+# Python : 3.11.0
+# GPT System Prompt : 너는 비트코인 투자 전문가야. 제공된 차트 데이터를 기반으로 현재 buy, sell, hold 중 어떤 선택을 해야할지 알려줘.
+# To English
+# You are an expert in Bitcoin investing. Tell me whether to buy, sell, or hold at the moment based on the chart data provided. response in json format.
+
+# Response Example:
+# {"decision": "buy", "reason": "some technical reason"}
+# {"decision": "sell", "reason": "some technical reason"}
+# {"decision": "hold", "reason": "some technical reason"}
+
+# ChatGPT Response 예제
+# Response(id='resp_00f3586f4b89b9200069a436d493448194ab3c11bbb4690c32', created_at=1772369620.0, error=None, incomplete_details=None, instructions=[EasyInputMessage(content=[ResponseInputText(text='You are an expert in Bitcoin investing. Tell me whether to buy, sell, or hold at the moment based on the chart data provided. response in json format.\n\nResponse Example:\r\n{"decision": "buy", "reason": "some technical reason"}\r\n{"decision": "sell", "reason": "some technical reason"}\r\n{"decision": "hold", "reason": "some technical reason"}', type='input_text')], role='system', phase=None, type='message')], metadata={}, model='gpt-4.1-2025-04-14', object='response', output=[ResponseOutputMessage(id='msg_00f3586f4b89b9200069a436d5365c8194b1b5724d928a948f', content=[ResponseOutputText(annotations=[], text='{\n  "decision": "hold",\n  "reason": "The chart data reflects recent high volatility with a sharp correction from the highs around 125,000,000 down to a consolidation in the 96,000,000–100,000,000 range. After a selloff, the price has stabilized and is showing some minor upward attempts, but there is no clear sign of a strong trend reversal or new bullish momentum. Volume spikes occurred during the selloff and subsequent consolidation, suggesting possible accumulation but not yet a confirmed breakout. It\'s prudent to hold while waiting for either a confirmed rally above resistance or a breakdown below recent lows."\n}', type='output_text', logprobs=[])], role='assistant', status='completed', type='message', phase=None)], parallel_tool_calls=True, temperature=1.0, tool_choice='auto', tools=[], top_p=1.0, background=False, completed_at=1772369622.0, conversation=None, max_output_tokens=258, max_tool_calls=None, previous_response_id=None, prompt=ResponsePrompt(id='pmpt_69a42fbb75048197b0a594ebc67ebeec0d6e59316a625c1b', variables={}, version='4'), prompt_cache_key=None, prompt_cache_retention=None, reasoning=Reasoning(effort=None, generate_summary=None, summary=None), safety_identifier=None, service_tier='default', status='completed', text=ResponseTextConfig(format=ResponseFormatJSONObject(type='json_object'), verbosity='medium'), top_logprobs=0, truncation='disabled', usage=ResponseUsage(input_tokens=2412, input_tokens_details=InputTokensDetails(cached_tokens=0), output_tokens=130, output_tokens_details=OutputTokensDetails(reasoning_tokens=0), total_tokens=2542), user=None, billing={'payer': 'developer'}, frequency_penalty=0.0, presence_penalty=0.0, store=True)
+
+python-dotenv
+openai
+pyupbit
