@@ -1,0 +1,38 @@
+import argparse
+from collections.abc import Sequence
+from pathlib import Path
+
+from investing_plz.adapters.upbit import UpbitMarketDataProvider
+from investing_plz.application.collect import collect_bars
+from investing_plz.domain import Instrument
+from investing_plz.storage import SQLiteBarStore
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="investing_plz")
+    commands = parser.add_subparsers(dest="command", required=True)
+    collect = commands.add_parser("collect", help="collect one page of market bars")
+    collect.add_argument("--venue", required=True, choices=["upbit"])
+    collect.add_argument("--symbol", required=True)
+    collect.add_argument("--timeframe", required=True, choices=["day"])
+    collect.add_argument("--database", type=Path, default=Path("data/market.db"))
+    collect.add_argument("--timeout", type=float, default=10.0)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    instrument = Instrument(venue=args.venue, symbol=args.symbol)
+    provider = UpbitMarketDataProvider(timeout=args.timeout)
+    result = collect_bars(
+        provider,
+        SQLiteBarStore(args.database),
+        instrument,
+        args.timeframe,
+    )
+    print(
+        f"fetched={result.fetched} inserted={result.inserted} "
+        f"total={result.total} database={args.database}"
+    )
+    return 0
+

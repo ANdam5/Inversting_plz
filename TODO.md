@@ -13,14 +13,14 @@
 
 ## M1 — Upbit OHLCV
 
-- [ ] 저장된 Upbit candle fixture 하나를 표준 `Bar`로 변환하고 UTC 값을 테스트한다.
-- [ ] Upbit 공개 API client로 KRW-BTC candle 한 페이지를 요청하고 HTTP 요청 구성을 테스트한다.
-- [ ] `UpbitMarketDataProvider`가 공개 API 응답을 시간순 `Bar` 목록으로 반환하는지 fixture로 테스트한다.
-- [ ] 로컬 Bar 저장 형식을 정하고 저장 후 조회 round-trip을 테스트한다.
-- [ ] KRW-BTC Bar 목록을 로컬에 저장하는 수집 use case를 구현하고 fake provider로 테스트한다.
-- [ ] `(instrument, timeframe, timestamp)` 기준 중복 방지를 구현하고 같은 Bar 재저장을 테스트한다.
-- [ ] OHLCV 수집 CLI를 추가하고 fake provider로 API→변환→저장 흐름을 end-to-end 테스트한다.
-- [ ] CLI에서 실제 Upbit KRW-BTC 공개 데이터를 한 번 수집하는 opt-in integration test를 추가한다.
+- [x] 저장된 Upbit candle fixture 하나를 표준 `Bar`로 변환하고 UTC 값을 테스트한다.
+- [x] Upbit 공개 API client로 KRW-BTC candle 한 페이지를 요청하고 HTTP 요청 구성을 테스트한다.
+- [x] `UpbitMarketDataProvider`가 공개 API 응답을 시간순 `Bar` 목록으로 반환하는지 fixture로 테스트한다.
+- [x] 로컬 Bar 저장 형식을 정하고 저장 후 조회 round-trip을 테스트한다.
+- [x] KRW-BTC Bar 목록을 로컬에 저장하는 수집 use case를 구현하고 fake provider로 테스트한다.
+- [x] `(instrument, timeframe, timestamp)` 기준 중복 방지를 구현하고 같은 Bar 재저장을 테스트한다.
+- [x] OHLCV 수집 CLI를 추가하고 fake provider로 API→변환→저장 흐름을 end-to-end 테스트한다.
+- [x] CLI에서 실제 Upbit KRW-BTC 공개 데이터를 한 번 수집하는 opt-in integration test를 추가한다.
 - [ ] candle pagination을 구현하고 페이지 경계 누락·중복을 테스트한다.
 - [ ] 저장된 최신 timestamp 이후만 수집하고 중단 후 재실행을 테스트한다.
 - [ ] Upbit API 오류를 표준 provider 오류로 변환하고 timeout·429 응답을 테스트한다.
