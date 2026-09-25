@@ -9,6 +9,7 @@ from investing_plz.backtest.models import (
     BacktestConfig,
     BacktestPortfolio,
     BacktestResult,
+    EquityPoint,
     Fill,
 )
 from investing_plz.domain import Bar, OrderSide
@@ -32,6 +33,7 @@ def run_backtest(
     pending_direction: OrderSide | None = None
     target_strategy_id = strategy.strategy_id
     fills: list[Fill] = []
+    equity_curve: list[EquityPoint] = []
     signal_count = bullish_count = bearish_count = 0
     intent_count = approved_count = adjusted_count = rejected_count = 0
 
@@ -131,6 +133,15 @@ def run_backtest(
                             if affordability_reduced:
                                 rebalance_pending = False
 
+        equity_curve.append(
+            EquityPoint(
+                timestamp=bar.timestamp,
+                portfolio_value=(
+                    portfolio.cash + portfolio.position_quantity * bar.close
+                ),
+            )
+        )
+
         history = bars[: index + 1]
         if len(history) < strategy.minimum_bars:
             continue
@@ -165,6 +176,7 @@ def run_backtest(
         adjusted_count=adjusted_count,
         rejected_count=rejected_count,
         fills=tuple(fills),
+        equity_curve=tuple(equity_curve),
     )
 
 

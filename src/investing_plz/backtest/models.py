@@ -6,6 +6,7 @@ from investing_plz.domain import Instrument, OrderSide
 from investing_plz.domain.decimal import require_decimal
 from investing_plz.domain.time import require_utc
 from investing_plz.risk import RiskLimits
+from investing_plz.backtest.metrics import calculate_max_drawdown, calculate_total_return
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +113,18 @@ class BacktestConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class EquityPoint:
+    timestamp: datetime
+    portfolio_value: Decimal
+
+    def __post_init__(self) -> None:
+        require_utc(self.timestamp)
+        require_decimal(self.portfolio_value, name="portfolio_value")
+        if self.portfolio_value < 0:
+            raise ValueError("portfolio_value must not be negative")
+
+
+@dataclass(frozen=True, slots=True)
 class BacktestResult:
     initial_cash: Decimal
     final_cash: Decimal
@@ -126,6 +139,7 @@ class BacktestResult:
     adjusted_count: int
     rejected_count: int
     fills: tuple[Fill, ...]
+    equity_curve: tuple[EquityPoint, ...] = ()
 
     @property
     def fill_count(self) -> int:
@@ -135,3 +149,13 @@ class BacktestResult:
     def total_fees(self) -> Decimal:
         total = sum((fill.fee_amount for fill in self.fills), start=Decimal("0"))
         return Decimal("0") if total == 0 else total
+
+    @property
+    def total_return(self) -> Decimal:
+        return calculate_total_return(self.initial_cash, self.final_portfolio_value)
+
+    @property
+    def maximum_drawdown(self) -> Decimal:
+        return calculate_max_drawdown(
+            tuple(point.portfolio_value for point in self.equity_curve)
+        )
