@@ -1,11 +1,14 @@
 import argparse
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 from investing_plz.adapters.upbit import UpbitMarketDataProvider
 from investing_plz.application.collect import collect_bars
+from investing_plz.backtest import BacktestConfig, run_backtest
 from investing_plz.domain import Instrument
+from investing_plz.risk import RiskLimits
 from investing_plz.strategy import MovingAverageCrossoverStrategy
 from investing_plz.storage import SQLiteBarStore
 
@@ -38,6 +41,28 @@ def build_parser() -> argparse.ArgumentParser:
     signal.add_argument("--database", type=Path, default=Path("data/market.db"))
     signal.add_argument("--fast", type=int, default=20)
     signal.add_argument("--slow", type=int, default=60)
+
+    backtest = commands.add_parser("backtest", help="replay closed bars deterministically")
+    backtest.add_argument("--venue", required=True)
+    backtest.add_argument("--symbol", required=True)
+    backtest.add_argument("--timeframe", required=True, choices=["day"])
+    backtest.add_argument("--database", type=Path, default=Path("data/market.db"))
+    backtest.add_argument("--fast", type=int, default=20)
+    backtest.add_argument("--slow", type=int, default=60)
+    backtest.add_argument("--initial-cash", type=Decimal, default=Decimal("10000000"))
+    backtest.add_argument("--target-weight", type=Decimal, default=Decimal("0.10"))
+    backtest.add_argument(
+        "--quantity-step", type=Decimal, default=Decimal("0.00000001")
+    )
+    backtest.add_argument(
+        "--max-order-amount", type=Decimal, default=Decimal("500000")
+    )
+    backtest.add_argument(
+        "--max-instrument-weight", type=Decimal, default=Decimal("0.20")
+    )
+    backtest.add_argument(
+        "--min-cash-reserve", type=Decimal, default=Decimal("1000000")
+    )
     return parser
 
 
@@ -90,6 +115,58 @@ def main(argv: Sequence[str] | None = None) -> int:
             "current_fast_ma": evaluation.current_fast_ma,
             "current_slow_ma": evaluation.current_slow_ma,
             "latest_signal": evaluation.signal.signal_type.value,
+        }
+        for key, value in output.items():
+            print(f"{key}={value}")
+        return 0
+
+    if args.command == "backtest":
+        bars = SQLiteBarStore(args.database).load_closed_bars(
+            instrument,
+            args.timeframe,
+            now=_utc_now(),
+        )
+        strategy = MovingAverageCrossoverStrategy(
+            fast_window=args.fast,
+            slow_window=args.slow,
+        )
+        result = run_backtest(
+            bars,
+            strategy,
+            BacktestConfig(
+                initial_cash=args.initial_cash,
+                target_weight=args.target_weight,
+                quantity_step=args.quantity_step,
+                risk_limits=RiskLimits(
+                    max_order_amount=args.max_order_amount,
+                    max_instrument_weight=args.max_instrument_weight,
+                    min_cash_reserve=args.min_cash_reserve,
+                ),
+            ),
+        )
+        output = {
+            "instrument": f"{instrument.venue}:{instrument.symbol}",
+            "dataset_start": bars[0].timestamp.isoformat(),
+            "dataset_end": bars[-1].timestamp.isoformat(),
+            "closed_bar_count": len(bars),
+            "initial_cash": result.initial_cash,
+            "fast_window": strategy.fast_window,
+            "slow_window": strategy.slow_window,
+            "target_weight": args.target_weight,
+            "signal_count": result.signal_count,
+            "bullish_signal_count": result.bullish_signal_count,
+            "bearish_signal_count": result.bearish_signal_count,
+            "intent_count": result.intent_count,
+            "approved_count": result.approved_count,
+            "adjusted_count": result.adjusted_count,
+            "rejected_count": result.rejected_count,
+            "fill_count": result.fill_count,
+            "final_cash": result.final_cash,
+            "final_position_quantity": result.final_position_quantity,
+            "final_position_market_value": result.final_position_market_value,
+            "final_portfolio_value": result.final_portfolio_value,
+            "fee": 0,
+            "slippage": 0,
         }
         for key, value in output.items():
             print(f"{key}={value}")

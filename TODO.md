@@ -71,24 +71,32 @@
 
 > Note: 동일 Intent 재처리와 중복 미체결 주문 차단은 Order/Broker 상태가 필요한 운영 위험이므로 M4 Paper Trading으로 이동했다.
 
-## M3 — Backtest와 Portfolio
+## M3-A — Minimal deterministic backtest
 
-- [ ] `Order`, `OrderStatus`, `Fill` 최소 모델을 정의하고 유효한 상태 전이를 테스트한다.
+- [x] 최소 `Fill` 모델을 정의하고 Decimal·UTC 불변조건을 테스트한다.
+- [x] 단일 종목 가상 현금과 보유 수량을 Fill로 갱신하고 초과 매도를 차단한다.
+- [x] 과거 closed Bar를 시간순으로 replay하고 같은 입력의 결과가 재현되는지 테스트한다.
+- [x] Signal을 다음 Bar open에서 sizing·Risk·Fill하여 look-ahead를 방지한다.
+- [x] 기존 Position sizing과 `BasicRiskManager`를 Backtest에서 재사용한다.
+- [x] backtest CLI를 추가하고 작은 SQLite fixture로 end-to-end 테스트한다.
+
+## M3-B — Fee / Slippage / Portfolio accounting / Metrics
+
+- [ ] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
 - [ ] Broker protocol을 정의하고 메모리 fake로 주문·체결 contract를 테스트한다.
-- [ ] Clock protocol과 fixed clock을 정의하고 시간 결정론을 테스트한다.
-- [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
-- [ ] 체결로 현금과 포지션을 갱신하고 매수/매도 원장 균형을 테스트한다.
 - [ ] 평균단가와 실현 손익 계산을 구현하고 부분 매도를 테스트한다.
 - [ ] 미실현 손익 평가를 구현하고 quote currency 일관성을 테스트한다.
-- [ ] 과거 Bar event replay를 구현하고 시간 순서 보장을 테스트한다.
-- [ ] next-bar 체결 모델을 구현하고 같은 Bar 미래가격 사용 금지를 테스트한다.
 - [ ] 수수료 모델 port를 구현하고 Upbit fee fixture를 테스트한다.
 - [ ] slippage 모델 port를 구현하고 0/고정 slippage를 테스트한다.
 - [ ] simulated broker 주문 생명주기를 구현하고 contract suite를 통과시킨다.
 - [ ] 거래·수익률·drawdown 지표를 각각 고정 원장으로 테스트한다.
+
+## M3-C — Metadata / reproducibility / architecture 강화
+
+- [ ] Clock protocol과 fixed clock을 정의하고 시간 결정론을 테스트한다.
+- [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
 - [ ] backtest run metadata에 코드/전략/파라미터/데이터 버전을 기록하고 round-trip을 테스트한다.
 - [ ] 동일 seed와 입력의 backtest 결과 재현성을 테스트한다.
-- [ ] backtest CLI를 추가하고 작은 fixture로 end-to-end 테스트한다.
 
 ## M4 — Paper Trading
 

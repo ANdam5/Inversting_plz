@@ -17,7 +17,7 @@ Upbit
 
 여기서 **일봉**은 하루 동안의 시가, 고가, 저가, 종가, 거래량을 한 묶음으로 표현한 데이터다.
 
-현재는 수집한 데이터로 20일·60일 이동평균 교차 Signal까지 계산할 수 있다. 하지만 자동매매 프로그램 전체는 아니며, 실제 주문이나 백테스트는 하지 않는다.
+현재는 수집한 데이터로 20일·60일 이동평균 교차 Signal을 계산하고, 과거 closed Bar 위에서 최소 Backtest를 실행할 수 있다. 하지만 자동매매 프로그램 전체는 아니며 실제 거래소 주문은 하지 않는다.
 
 ## 2. 현재 할 수 있는 것 / 아직 할 수 없는 것
 
@@ -37,15 +37,17 @@ Upbit
 - 종가의 Simple Moving Average(SMA) 계산하기
 - 20일·60일 이동평균의 실제 교차 시점에 Strategy Signal 만들기
 - signal 명령으로 최신 closed Bar 기준 판단 확인하기
+- closed Bar를 시간순으로 재생하는 결정론적 Backtest 실행하기
+- 다음 Bar open에서 가상 체결하고 단일 종목 가상 현금·수량 확인하기
 
 ### 현재 불가능한 것
 
-- 백테스트 실행
-- 수익률과 손익 계산
-- 주문 생성 또는 제출
+- 수수료·slippage를 반영한 현실적인 성과 분석
+- 평균단가, 실현손익, MDD 같은 상세 지표 계산
+- 실제 거래소 Order 생성 또는 제출
 - Paper Trading
 - 실제 투자
-- Portfolio 관리
+- 실제 계좌 Portfolio 관리
 - AI 또는 뉴스 분석
 
 ## 3. 프로젝트 폴더 구조
@@ -67,7 +69,7 @@ Inversting_plz/
 ├─ src/investing_plz/
 │  ├─ __init__.py                  # investing_plz를 Python 패키지로 표시
 │  ├─ __main__.py                  # python -m investing_plz 실행 시작점
-│  ├─ cli.py                       # collect/summary 명령과 옵션 처리
+│  ├─ cli.py                       # collect/summary/signal/backtest 명령 처리
 │  ├─ indicators/
 │  │  ├─ __init__.py              # indicator 함수 공개
 │  │  └─ moving_average.py        # Decimal 종가의 Simple Moving Average
@@ -78,6 +80,10 @@ Inversting_plz/
 │  │  ├─ __init__.py              # application 패키지 표시
 │  │  ├─ collect.py               # 데이터 수집 전체 순서를 조정
 │  │  └─ position_sizing.py       # 목표 비중을 OrderIntent 수량으로 변환
+│  ├─ backtest/
+│  │  ├─ __init__.py              # Backtest 공개 이름 모음
+│  │  ├─ models.py                # 설정, Fill, 가상 Portfolio, 결과 모델
+│  │  └─ runner.py                # closed Bar를 순서대로 재생하는 실행기
 │  ├─ domain/
 │  │  ├─ __init__.py              # 주요 domain 모델 공개
 │  │  ├─ instrument.py            # 거래소와 종목을 나타내는 Instrument
@@ -111,6 +117,8 @@ Inversting_plz/
    ├─ integration/
    │  └─ test_upbit_public_api.py # 실제 Upbit 공개 API 연결 검사
    ├─ test_bar.py
+   ├─ test_backtest.py             # next-bar 체결, Risk, Portfolio, 결정론 검사
+   ├─ test_backtest_cli.py         # SQLite→Backtest→출력 전체 흐름 검사
    ├─ test_cli.py
    ├─ test_closed_candles.py
    ├─ test_collect.py
@@ -567,6 +575,59 @@ Signal
 
 `signal`을 실제 실행하면 저장된 시장 데이터로 현재 판단을 계산한다. 반면 Strategy 테스트는 사람이 만든 고정 Bar를 사용해 bullish, bearish, neutral 규칙이 언제나 같은 결과를 내는지 검사한다. 테스트는 실제 투자 판단이나 주문을 수행하지 않는다.
 
+## 9B. 최소 Backtest
+
+Backtest는 과거 시장 데이터를 오래된 순서부터 다시 재생하면서 현재 Rule을 적용했을 때 가상 돈이 어떻게 변했는지 보는 실험이다. M3-A의 목적은 수익성을 증명하는 것이 아니라 지금까지 만든 구성요소가 올바른 순서로 연결되는지 확인하는 것이다.
+
+```text
+Historical closed Bars
+  ↓
+Strategy
+  ↓
+Signal (Bar T의 close까지 사용)
+  ↓
+다음 Bar T+1 open
+  ↓
+Position sizing
+  ↓
+OrderIntent
+  ↓
+BasicRiskManager
+  ↓
+Simulated Fill
+  ↓
+가상 Portfolio
+  ↓
+다음 Bar...
+```
+
+- **Fill**은 승인된 주문 후보가 특정 가격에서 실제로 체결됐다고 가정한 결과다. 여기서는 다음 Bar의 open 가격에 전체 수량이 즉시 체결됐다고 가정한다.
+- **Portfolio**는 Backtest 안의 가상 현금과 단일 종목 보유 수량이다. 실제 Upbit 계좌나 잔고가 아니다.
+- **Mark-to-market**은 마지막에 팔지 않은 보유 자산을 최신 closed Bar의 close 가격으로 평가하는 것이다.
+- **Look-ahead bias**는 그 시점에는 알 수 없던 미래 정보를 과거 판단에 사용하는 오류다.
+
+Bar T의 종가는 하루가 끝나야 알 수 있으므로, 그 종가로 만든 Signal을 같은 Bar의 open이나 close에 체결하지 않는다. Signal은 다음 Bar까지 기다리고, T+1 open 가격으로 sizing과 Risk 검사를 한 뒤 같은 가격으로 Fill한다. 마지막 Bar에서 생긴 Signal은 다음 Bar가 없으므로 체결되지 않는다.
+
+현재 가상 Portfolio는 `cash`와 `position_quantity`만 가진다. BUY Fill은 현금을 줄이고 수량을 늘리며, SELL Fill은 반대로 처리한다. 보유량보다 많이 팔 수 없다. 종료 시에는 `cash + position_quantity × latest_close`로 최종 가치를 계산한다.
+
+```powershell
+python -m investing_plz backtest `
+  --venue upbit `
+  --symbol KRW-BTC `
+  --timeframe day `
+  --database data\krw_btc_5y.db `
+  --fast 20 `
+  --slow 60 `
+  --initial-cash 10000000 `
+  --target-weight 0.10 `
+  --quantity-step 0.00000001 `
+  --max-order-amount 500000 `
+  --max-instrument-weight 0.20 `
+  --min-cash-reserve 1000000
+```
+
+이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. 현재 baseline은 `fee=0`, `slippage=0`이며 평균단가, 실현손익, MDD 같은 성과 지표도 없으므로 결과만 보고 Strategy가 좋다고 판단하면 안 된다.
+
 ## 10. pytest란 무엇인가
 
 다음 명령은 시장 데이터를 수집하는 명령이 아니다.
@@ -821,9 +882,11 @@ tests/
 | M2-B2-B | Position sizing과 BTC/ETF 재사용 | 부분 완료 |
 | M2-C1 | Basic Risk Manager | 완료 |
 | M2-C2 | 중복 미체결 주문과 운영 위험 | **아직 구현되지 않음** |
-| M3 | Backtest | **아직 구현되지 않음** |
+| M3-A | 최소 결정론적 Backtest | 완료 |
+| M3-B | 수수료·slippage·상세 회계·성과 지표 | **아직 구현되지 않음** |
+| M3-C | 실행 metadata·범용 architecture 강화 | **아직 구현되지 않음** |
 
-현재 저장소에는 Signal, Position sizing, OrderIntent와 기본 Risk 판단까지 있다. 실제 Order, 미체결 주문 상태, Broker, Portfolio와 M3 백테스트 엔진은 아직 없다.
+현재 저장소에는 Signal, Position sizing, OrderIntent, 기본 Risk 판단과 단일 종목 가상 Portfolio를 사용하는 최소 Backtest가 있다. 실제 Order, 미체결 주문 상태, Broker와 실제 계좌 Portfolio는 아직 없다.
 
 ## 17. 초보자가 지금 이해하면 충분한 것
 
