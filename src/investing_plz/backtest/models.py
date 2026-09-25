@@ -184,6 +184,10 @@ class BacktestResult:
         return len(self.fills)
 
     @property
+    def run_fingerprint(self) -> str | None:
+        return None if self.metadata is None else self.metadata.fingerprint
+
+    @property
     def total_fees(self) -> Decimal:
         total = sum((fill.fee_amount for fill in self.fills), start=Decimal("0"))
         return Decimal("0") if total == 0 else total

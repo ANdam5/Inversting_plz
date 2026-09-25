@@ -88,7 +88,7 @@ def test_metadata_json_round_trip_preserves_decimal_and_utc_values() -> None:
     payload = json.loads(json.dumps(original.to_dict()))
 
     assert payload["initial_cash"] == "10000000"
-    assert payload["target_weight"] == "0.10"
+    assert payload["target_weight"] == "0.1"
     assert payload["dataset_start"] == "2024-01-01T00:00:00+00:00"
     assert BacktestRunMetadata.from_dict(payload) == original
 

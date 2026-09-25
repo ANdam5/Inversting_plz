@@ -1,7 +1,9 @@
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from hashlib import sha256
 
 from investing_plz.backtest.models import BacktestConfig
 from investing_plz.domain import Bar, Instrument
@@ -86,17 +88,23 @@ class BacktestRunMetadata:
             "strategy_id": self.strategy_id,
             "fast_window": self.fast_window,
             "slow_window": self.slow_window,
-            "initial_cash": str(self.initial_cash),
-            "target_weight": str(self.target_weight),
-            "quantity_step": str(self.quantity_step),
-            "min_trade_amount": str(self.min_trade_amount),
-            "max_order_amount": str(self.max_order_amount),
-            "max_instrument_weight": str(self.max_instrument_weight),
-            "min_cash_reserve": str(self.min_cash_reserve),
-            "fee_rate": str(self.fee_rate),
-            "slippage_bps": str(self.slippage_bps),
+            "initial_cash": _canonical_decimal(self.initial_cash),
+            "target_weight": _canonical_decimal(self.target_weight),
+            "quantity_step": _canonical_decimal(self.quantity_step),
+            "min_trade_amount": _canonical_decimal(self.min_trade_amount),
+            "max_order_amount": _canonical_decimal(self.max_order_amount),
+            "max_instrument_weight": _canonical_decimal(
+                self.max_instrument_weight
+            ),
+            "min_cash_reserve": _canonical_decimal(self.min_cash_reserve),
+            "fee_rate": _canonical_decimal(self.fee_rate),
+            "slippage_bps": _canonical_decimal(self.slippage_bps),
             "code_version": self.code_version,
         }
+
+    @property
+    def fingerprint(self) -> str:
+        return calculate_run_fingerprint(self)
 
     @classmethod
     def from_dict(cls, payload: dict[str, object]) -> "BacktestRunMetadata":
@@ -162,6 +170,26 @@ def create_backtest_run_metadata(
         slippage_bps=config.slippage_bps,
         code_version=code_version,
     )
+
+
+def canonical_metadata_json(metadata: BacktestRunMetadata) -> str:
+    return json.dumps(
+        metadata.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def calculate_run_fingerprint(metadata: BacktestRunMetadata) -> str:
+    canonical = canonical_metadata_json(metadata)
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _canonical_decimal(value: Decimal) -> str:
+    if value == 0:
+        return "0"
+    return format(value.normalize(), "f")
 
 
 def _decimal_from(payload: dict[str, object], name: str) -> Decimal:

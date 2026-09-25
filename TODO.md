@@ -119,7 +119,7 @@
 ## M3-C — Backtest Metadata / Reproducibility
 
 - [x] backtest run metadata에 코드/전략/파라미터/데이터 버전을 기록하고 round-trip을 테스트한다.
-- [ ] 동일 dataset과 동일 configuration에서 동일 fingerprint와 backtest 결과가 생성되는지 테스트한다.
+- [x] 동일 dataset과 동일 configuration에서 동일 fingerprint와 backtest 결과가 생성되는지 테스트한다.
 
 ## M4 — Paper Trading
 

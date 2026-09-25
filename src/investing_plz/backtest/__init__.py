@@ -12,6 +12,8 @@ from investing_plz.backtest.metrics import (
 )
 from investing_plz.backtest.metadata import (
     BacktestRunMetadata,
+    calculate_run_fingerprint,
+    canonical_metadata_json,
     create_backtest_run_metadata,
 )
 from investing_plz.backtest.models import (
@@ -43,9 +45,11 @@ __all__ = [
     "calculate_fee",
     "calculate_cagr",
     "calculate_max_drawdown",
+    "calculate_run_fingerprint",
     "calculate_trade_metrics",
     "calculate_trade_return",
     "calculate_total_return",
+    "canonical_metadata_json",
     "create_backtest_run_metadata",
     "run_backtest",
     "run_passive_benchmark",
