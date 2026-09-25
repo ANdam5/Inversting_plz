@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from investing_plz.domain import Instrument, OrderSide
 from investing_plz.domain.decimal import require_decimal
@@ -11,6 +14,9 @@ from investing_plz.backtest.metrics import (
     calculate_max_drawdown,
     calculate_total_return,
 )
+
+if TYPE_CHECKING:
+    from investing_plz.backtest.metadata import BacktestRunMetadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +177,7 @@ class BacktestResult:
     equity_curve: tuple[EquityPoint, ...] = ()
     final_average_cost: Decimal = Decimal("0")
     cumulative_realized_pnl: Decimal = Decimal("0")
+    metadata: BacktestRunMetadata | None = None
 
     @property
     def fill_count(self) -> int:

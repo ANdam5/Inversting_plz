@@ -10,6 +10,10 @@ from investing_plz.backtest.metrics import (
     calculate_max_drawdown,
     calculate_total_return,
 )
+from investing_plz.backtest.metadata import (
+    BacktestRunMetadata,
+    create_backtest_run_metadata,
+)
 from investing_plz.backtest.models import (
     BacktestConfig,
     BacktestPortfolio,
@@ -29,6 +33,7 @@ __all__ = [
     "BacktestConfig",
     "BacktestPortfolio",
     "BacktestResult",
+    "BacktestRunMetadata",
     "ClosedTrade",
     "EquityPoint",
     "Fill",
@@ -41,6 +46,7 @@ __all__ = [
     "calculate_trade_metrics",
     "calculate_trade_return",
     "calculate_total_return",
+    "create_backtest_run_metadata",
     "run_backtest",
     "run_passive_benchmark",
     "build_closed_trades",

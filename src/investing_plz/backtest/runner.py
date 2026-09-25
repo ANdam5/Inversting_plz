@@ -5,6 +5,7 @@ from investing_plz.application.position_sizing import (
     create_target_weight_order_intent,
 )
 from investing_plz.backtest.costs import apply_slippage, calculate_fee
+from investing_plz.backtest.metadata import create_backtest_run_metadata
 from investing_plz.backtest.models import (
     BacktestConfig,
     BacktestPortfolio,
@@ -22,10 +23,26 @@ def run_backtest(
     bars: Sequence[Bar],
     strategy: MovingAverageCrossoverStrategy,
     config: BacktestConfig,
+    *,
+    code_version: str | None = None,
+    dataset_version: str | None = None,
 ) -> BacktestResult:
     """Replay closed bars and execute each actionable signal at the next open."""
 
     _validate_bars(bars)
+    if (code_version is None) != (dataset_version is None):
+        raise ValueError("code_version and dataset_version must be provided together")
+    metadata = (
+        create_backtest_run_metadata(
+            bars,
+            strategy,
+            config,
+            code_version=code_version,
+            dataset_version=dataset_version,
+        )
+        if code_version is not None and dataset_version is not None
+        else None
+    )
     portfolio = BacktestPortfolio(cash=config.initial_cash)
     risk_manager = BasicRiskManager()
     desired_target_weight = Decimal("0")
@@ -179,6 +196,7 @@ def run_backtest(
         equity_curve=tuple(equity_curve),
         final_average_cost=portfolio.average_cost,
         cumulative_realized_pnl=portfolio.realized_pnl,
+        metadata=metadata,
     )
 
 
