@@ -41,5 +41,10 @@ class InMemoryBroker:
         if order is None:
             raise KeyError(f"order not found: {order_id}")
         canceled = order.transition_to(OrderStatus.CANCELED)
-        self._orders[order_id] = canceled
+        self._replace_order(canceled)
         return canceled
+
+    def _replace_order(self, order: Order) -> None:
+        if order.order_id not in self._orders:
+            raise KeyError(f"order not found: {order.order_id}")
+        self._orders[order.order_id] = order

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from investing_plz.broker import Broker, InMemoryBroker
+from investing_plz.broker import Broker, InMemoryBroker, PaperBroker
 from investing_plz.domain import Instrument, OrderIntent, OrderSide, OrderStatus
 
 
@@ -22,8 +22,8 @@ def make_intent(
     )
 
 
-@pytest.fixture
-def broker() -> Broker:
+@pytest.fixture(params=[InMemoryBroker, PaperBroker])
+def broker(request: pytest.FixtureRequest) -> Broker:
     identifiers = iter(("order-1", "order-2", "order-3"))
     timestamps = iter(
         (
@@ -32,7 +32,8 @@ def broker() -> Broker:
             datetime(2026, 9, 26, 0, 2, tzinfo=timezone.utc),
         )
     )
-    return InMemoryBroker(
+    broker_type = request.param
+    return broker_type(
         order_id_factory=lambda: next(identifiers),
         submitted_at_factory=lambda: next(timestamps),
     )
