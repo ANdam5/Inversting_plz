@@ -136,7 +136,7 @@
 - [x] closed Bar decision identity를 영속화하고 재처리 시 동일 identity를 테스트한다.
 - [x] 동일 decision 재처리 및 scope별 중복 미체결 주문 제출 차단을 테스트한다.
 - [x] Paper Order·Fill·cursor SQLite persistence foundation을 구현한다.
-- [ ] 영속 Order·Fill·cursor로 Paper account와 scheduler를 재시작 복구한다.
+- [x] 영속 Order·Fill·cursor로 Paper account와 scheduler를 재시작 복구한다.
 - [ ] 저장 상태와 broker 상태 reconciliation을 구현하고 불일치 시나리오를 테스트한다.
 - [ ] stale market data 차단 규칙을 구현하고 신규 주문 거부를 테스트한다.
 - [ ] 구조화 로그에 run/order correlation ID를 추가하고 로그 capture로 테스트한다.

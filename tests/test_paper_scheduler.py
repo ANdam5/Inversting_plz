@@ -87,6 +87,7 @@ def make_scheduler(
     price_provider,
     cycle_runner,
     interval: timedelta = timedelta(minutes=1),
+    cursor_saver=None,
 ) -> PaperPollingScheduler:
     return PaperPollingScheduler(
         clock=clock,
@@ -94,6 +95,7 @@ def make_scheduler(
         closed_bars_provider=bars_provider,
         execution_price_provider=price_provider,
         cycle_runner=cycle_runner,
+        cursor_saver=cursor_saver,
     )
 
 
@@ -293,11 +295,13 @@ def test_normal_cycle_results_advance_cursor(result_kind: str) -> None:
     else:
         cycle_result = neutral_result(bar)
 
+    saved: list[datetime] = []
     scheduler = make_scheduler(
         clock=clock,
         bars_provider=lambda: [bar],
         price_provider=lambda: Decimal("100"),
         cycle_runner=lambda bars, price: cycle_result,
+        cursor_saver=saved.append,
     )
 
     result = scheduler.run_if_due()
@@ -305,12 +309,14 @@ def test_normal_cycle_results_advance_cursor(result_kind: str) -> None:
     assert result.processed
     assert result.cycle_result == cycle_result
     assert scheduler.last_processed_bar_timestamp == bar.timestamp
+    assert saved == [bar.timestamp]
 
 
 def test_cycle_exception_keeps_cursor_and_allows_next_due_retry() -> None:
     clock = MutableClock(START)
     bar = make_bar(25)
     attempts = 0
+    saved: list[datetime] = []
 
     def cycle_runner(bars, price):
         nonlocal attempts
@@ -324,11 +330,13 @@ def test_cycle_exception_keeps_cursor_and_allows_next_due_retry() -> None:
         bars_provider=lambda: [bar],
         price_provider=lambda: Decimal("100"),
         cycle_runner=cycle_runner,
+        cursor_saver=saved.append,
     )
 
     with pytest.raises(RuntimeError, match="cycle failed"):
         scheduler.run_if_due()
     assert scheduler.last_processed_bar_timestamp is None
+    assert saved == []
 
     assert not scheduler.run_if_due().poll_due
     clock.advance(timedelta(minutes=1))
@@ -337,6 +345,45 @@ def test_cycle_exception_keeps_cursor_and_allows_next_due_retry() -> None:
     assert retry.processed
     assert attempts == 2
     assert scheduler.last_processed_bar_timestamp == bar.timestamp
+    assert saved == [bar.timestamp]
+
+
+def test_cursor_save_failure_keeps_memory_cursor_and_retries_same_bar() -> None:
+    clock = MutableClock(START)
+    bar = make_bar(25)
+    cycle_calls = 0
+    save_attempts = 0
+
+    def cycle_runner(bars, price):
+        nonlocal cycle_calls
+        cycle_calls += 1
+        return neutral_result(bars[-1])
+
+    def cursor_saver(timestamp):
+        nonlocal save_attempts
+        save_attempts += 1
+        if save_attempts == 1:
+            raise RuntimeError("cursor storage unavailable")
+
+    scheduler = make_scheduler(
+        clock=clock,
+        bars_provider=lambda: [bar],
+        price_provider=lambda: Decimal("100"),
+        cycle_runner=cycle_runner,
+        cursor_saver=cursor_saver,
+    )
+
+    with pytest.raises(RuntimeError, match="cursor storage unavailable"):
+        scheduler.run_if_due()
+    assert scheduler.last_processed_bar_timestamp is None
+
+    clock.advance(timedelta(minutes=1))
+    retry = scheduler.run_if_due()
+
+    assert retry.processed
+    assert scheduler.last_processed_bar_timestamp == bar.timestamp
+    assert cycle_calls == 2
+    assert save_attempts == 2
 
 
 def test_scheduler_can_delegate_to_actual_run_paper_cycle() -> None:

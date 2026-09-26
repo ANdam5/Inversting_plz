@@ -12,6 +12,7 @@ from investing_plz.domain.time import require_utc
 ClosedBarsProvider = Callable[[], Sequence[Bar]]
 ExecutionPriceProvider = Callable[[], Decimal]
 PaperCycleRunner = Callable[[Sequence[Bar], Decimal], PaperCycleResult]
+CursorSaver = Callable[[datetime], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,8 @@ class PaperPollingScheduler:
         closed_bars_provider: ClosedBarsProvider,
         execution_price_provider: ExecutionPriceProvider,
         cycle_runner: PaperCycleRunner,
+        initial_last_processed_bar_timestamp: datetime | None = None,
+        cursor_saver: CursorSaver | None = None,
     ) -> None:
         if poll_interval <= timedelta(0):
             raise ValueError("poll_interval must be greater than zero")
@@ -42,8 +45,13 @@ class PaperPollingScheduler:
         self._closed_bars_provider = closed_bars_provider
         self._execution_price_provider = execution_price_provider
         self._cycle_runner = cycle_runner
+        self._cursor_saver = cursor_saver
         self._next_poll_at: datetime | None = None
-        self._last_processed_bar_timestamp: datetime | None = None
+        self._last_processed_bar_timestamp = (
+            None
+            if initial_last_processed_bar_timestamp is None
+            else require_utc(initial_last_processed_bar_timestamp)
+        )
 
     @property
     def last_processed_bar_timestamp(self) -> datetime | None:
@@ -71,6 +79,8 @@ class PaperPollingScheduler:
 
         reference_price = self._execution_price_provider()
         cycle_result = self._cycle_runner(bars, reference_price)
+        if self._cursor_saver is not None:
+            self._cursor_saver(newest_timestamp)
         self._last_processed_bar_timestamp = newest_timestamp
         return PaperPollResult(
             True,

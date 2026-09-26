@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from decimal import Decimal
 
@@ -38,6 +38,98 @@ class PaperBroker(InMemoryBroker):
         self._slippage_bps = validate_slippage_bps(slippage_bps)
         self._positions: dict[Instrument, Decimal] = {}
         self._fills: dict[str, ExecutionFill] = {}
+
+    @classmethod
+    def from_persisted_state(
+        cls,
+        *,
+        initial_cash: Decimal,
+        orders: Sequence[Order],
+        fills: Sequence[ExecutionFill],
+        fee_rate: Decimal = Decimal("0"),
+        slippage_bps: Decimal = Decimal("0"),
+        order_id_factory: Callable[[], str],
+        submitted_at_factory: Callable[[], datetime],
+    ) -> "PaperBroker":
+        """Hydrate current state without replaying broker execution operations."""
+
+        broker = cls(
+            initial_cash=initial_cash,
+            fee_rate=fee_rate,
+            slippage_bps=slippage_bps,
+            order_id_factory=order_id_factory,
+            submitted_at_factory=submitted_at_factory,
+        )
+        persisted_orders = tuple(orders)
+        persisted_fills = tuple(fills)
+        order_by_id: dict[str, Order] = {}
+        for order in persisted_orders:
+            if not isinstance(order, Order):
+                raise TypeError("orders must contain only Order values")
+            if order.order_id in order_by_id:
+                raise ValueError(f"duplicate persisted order_id: {order.order_id}")
+            order_by_id[order.order_id] = order
+
+        fill_by_id: dict[str, ExecutionFill] = {}
+        filled_order_ids: set[str] = set()
+        cash = broker._cash
+        positions: dict[Instrument, Decimal] = {}
+        for fill in persisted_fills:
+            if not isinstance(fill, ExecutionFill):
+                raise TypeError("fills must contain only ExecutionFill values")
+            if fill.fill_id in fill_by_id:
+                raise ValueError(f"duplicate persisted fill_id: {fill.fill_id}")
+            order = order_by_id.get(fill.order_id)
+            if order is None:
+                raise ValueError(
+                    f"persisted fill references missing order: {fill.order_id}"
+                )
+            _validate_persisted_fill(fill, order)
+            if order.order_id in filled_order_ids:
+                raise ValueError(
+                    f"multiple fills found for non-partial order: {order.order_id}"
+                )
+            filled_order_ids.add(order.order_id)
+            fill_by_id[fill.fill_id] = fill
+            notional = fill.quantity * fill.fill_price
+            quantity = positions.get(fill.instrument, Decimal("0"))
+            if fill.side is OrderSide.BUY:
+                cash -= notional + fill.fee_amount
+                positions[fill.instrument] = quantity + fill.quantity
+            else:
+                cash += notional - fill.fee_amount
+                positions[fill.instrument] = quantity - fill.quantity
+
+        missing_fills = {
+            order.order_id
+            for order in persisted_orders
+            if order.status is OrderStatus.FILLED
+            and order.order_id not in filled_order_ids
+        }
+        if missing_fills:
+            raise ValueError(
+                "FILLED orders must have exactly one persisted fill: "
+                + ", ".join(sorted(missing_fills))
+            )
+        if cash < 0:
+            raise ValueError("persisted fills produce negative cash")
+        negative_positions = [
+            instrument
+            for instrument, quantity in positions.items()
+            if quantity < 0
+        ]
+        if negative_positions:
+            names = ", ".join(
+                f"{instrument.venue}:{instrument.symbol}"
+                for instrument in negative_positions
+            )
+            raise ValueError(f"persisted fills produce negative position: {names}")
+
+        broker._orders = order_by_id
+        broker._fills = fill_by_id
+        broker._cash = cash
+        broker._positions = positions
+        return broker
 
     @property
     def cash(self) -> Decimal:
@@ -112,3 +204,15 @@ class PaperBroker(InMemoryBroker):
         rejected = order.transition_to(OrderStatus.REJECTED)
         self._replace_order(rejected)
         return rejected
+
+
+def _validate_persisted_fill(fill: ExecutionFill, order: Order) -> None:
+    if order.status is not OrderStatus.FILLED:
+        raise ValueError("persisted fill requires a FILLED order")
+    if (
+        fill.instrument != order.instrument
+        or fill.side is not order.side
+        or fill.quantity != order.quantity
+        or fill.strategy_id != order.strategy_id
+    ):
+        raise ValueError("persisted fill does not match its order")
