@@ -133,10 +133,10 @@
 - [x] paper broker의 명시적 Order/Fill 생명주기를 구현하고 Broker 주문 contract를 통과시킨다.
 - [x] paper broker의 cash/position 및 비용 반영 실행을 구현하고 테스트한다.
 - [x] closed Bar부터 PaperBroker 실행까지 단일 paper cycle을 연결하고 테스트한다.
-- [ ] 주문 idempotency key 생성을 구현하고 재처리 시 동일 키를 테스트한다.
-- [ ] 동일 Intent 재처리 및 중복 미체결 주문 제출 차단을 테스트한다.
+- [x] closed Bar decision identity를 영속화하고 재처리 시 동일 identity를 테스트한다.
+- [x] 동일 decision 재처리 및 scope별 중복 미체결 주문 제출 차단을 테스트한다.
 - [x] Paper Order·Fill·cursor SQLite persistence foundation을 구현한다.
-- [ ] 영속 상태를 Paper 실행에 연결하고 재시작 복구를 테스트한다.
+- [ ] 영속 Order·Fill·cursor로 Paper account와 scheduler를 재시작 복구한다.
 - [ ] 저장 상태와 broker 상태 reconciliation을 구현하고 불일치 시나리오를 테스트한다.
 - [ ] stale market data 차단 규칙을 구현하고 신규 주문 거부를 테스트한다.
 - [ ] 구조화 로그에 run/order correlation ID를 추가하고 로그 capture로 테스트한다.

@@ -4,6 +4,7 @@ from typing import Protocol
 
 from investing_plz.broker.models import ExecutionFill
 from investing_plz.domain import Instrument, Order
+from investing_plz.domain.time import require_utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,19 @@ class PaperCursorScope:
             raise ValueError("timeframe must not be empty")
 
 
+@dataclass(frozen=True, slots=True)
+class PaperDecisionKey:
+    """Identity of one strategy decision for one completed market bar."""
+
+    scope: PaperCursorScope
+    closed_bar_timestamp: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, PaperCursorScope):
+            raise TypeError("scope must be a PaperCursorScope")
+        require_utc(self.closed_bar_timestamp)
+
+
 class PaperRepository(Protocol):
     """Persistence contract for paper orders, fills, and scheduler cursors."""
 
@@ -36,11 +50,27 @@ class PaperRepository(Protocol):
 
     def list_open_orders(self) -> tuple[Order, ...]: ...
 
+    def register_order_submission(
+        self, decision_key: PaperDecisionKey, order: Order
+    ) -> bool: ...
+
+    def get_order_for_decision(
+        self, decision_key: PaperDecisionKey
+    ) -> Order | None: ...
+
+    def find_open_order_for_scope(
+        self, scope: PaperCursorScope
+    ) -> Order | None: ...
+
     def save_fill(self, fill: ExecutionFill) -> bool: ...
 
     def get_fill(self, fill_id: str) -> ExecutionFill | None: ...
 
     def list_fills(self) -> tuple[ExecutionFill, ...]: ...
+
+    def save_execution(
+        self, order: Order, fill: ExecutionFill | None
+    ) -> None: ...
 
     def get_last_processed_bar_timestamp(
         self, scope: PaperCursorScope

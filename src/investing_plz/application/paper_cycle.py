@@ -11,6 +11,11 @@ from investing_plz.domain import Bar, Order, OrderIntent, OrderSide
 from investing_plz.domain.decimal import require_decimal
 from investing_plz.domain.time import require_utc
 from investing_plz.risk import RiskContext, RiskDecision, RiskLimits, RiskManager
+from investing_plz.storage.paper import (
+    PaperCursorScope,
+    PaperDecisionKey,
+    PaperRepository,
+)
 from investing_plz.strategy import Signal, SignalType, Strategy
 
 
@@ -36,6 +41,7 @@ def run_paper_cycle(
     execution_reference_price: Decimal,
     fill_id_factory: Callable[[], str],
     clock: Clock,
+    repository: PaperRepository | None = None,
 ) -> PaperCycleResult:
     """Run one single-instrument paper decision and execution cycle.
 
@@ -100,7 +106,26 @@ def run_paper_cycle(
     if decision.approved_intent is None:
         return PaperCycleResult(signal, intent, decision, None, None)
 
+    decision_scope = PaperCursorScope(
+        instrument=instrument,
+        strategy_id=signal.strategy_id,
+        timeframe=bars[-1].interval,
+    )
+    decision_key = PaperDecisionKey(
+        scope=decision_scope,
+        closed_bar_timestamp=bars[-1].timestamp,
+    )
+    if repository is not None:
+        existing = repository.get_order_for_decision(decision_key)
+        if existing is not None:
+            return PaperCycleResult(signal, intent, decision, existing, None)
+        pending = repository.find_open_order_for_scope(decision_scope)
+        if pending is not None:
+            return PaperCycleResult(signal, intent, decision, pending, None)
+
     submitted = broker.submit(decision.approved_intent)
+    if repository is not None:
+        repository.register_order_submission(decision_key, submitted)
     fill = broker.execute_order(
         submitted.order_id,
         reference_price=execution_reference_price,
@@ -109,6 +134,8 @@ def run_paper_cycle(
     )
     final_order = broker.get_order(submitted.order_id)
     assert final_order is not None
+    if repository is not None:
+        repository.save_execution(final_order, fill)
     return PaperCycleResult(signal, intent, decision, final_order, fill)
 
 

@@ -7,6 +7,7 @@ from investing_plz.broker import ExecutionFill
 from investing_plz.domain import Instrument, Order, OrderSide, OrderStatus
 from investing_plz.storage import (
     PaperCursorScope,
+    PaperDecisionKey,
     PaperRepository,
     SQLitePaperRepository,
 )
@@ -258,3 +259,165 @@ def test_repository_reopen_restores_order_fill_and_cursor(tmp_path) -> None:
     assert repository_b.get_last_processed_bar_timestamp(scope) == cursor
     assert repository_b.list_orders() == (filled,)
     assert repository_b.list_fills() == (fill,)
+
+
+def decision_key(
+    *,
+    instrument: Instrument = BTC,
+    strategy_id: str = "moving_average_crossover",
+    timeframe: str = "day",
+    timestamp: datetime = datetime(2026, 9, 24, tzinfo=timezone.utc),
+) -> PaperDecisionKey:
+    return PaperDecisionKey(
+        PaperCursorScope(instrument, strategy_id, timeframe),
+        timestamp,
+    )
+
+
+def test_decision_key_identity_and_utc_validation() -> None:
+    original = decision_key()
+
+    assert original == decision_key()
+    assert original != decision_key(timestamp=datetime(2026, 9, 25, tzinfo=timezone.utc))
+    assert original != decision_key(instrument=ETH)
+    assert original != decision_key(strategy_id="other")
+    assert original != decision_key(timeframe="minute60")
+    with pytest.raises(ValueError, match="timezone-aware"):
+        decision_key(timestamp=datetime(2026, 9, 24))
+
+
+def test_register_submission_round_trip_and_same_registration_policy(
+    repository,
+) -> None:
+    key = decision_key()
+    order = make_order()
+
+    assert repository.register_order_submission(key, order) is True
+    assert repository.register_order_submission(key, order) is False
+    assert repository.get_order_for_decision(key) == order
+    assert repository.find_open_order_for_scope(key.scope) == order
+
+
+def test_decision_cannot_be_linked_to_a_different_order(repository) -> None:
+    key = decision_key()
+    first = make_order("order-1")
+    second = make_order("order-2")
+    repository.register_order_submission(key, first)
+
+    with pytest.raises(ValueError, match="different order"):
+        repository.register_order_submission(key, second)
+
+    assert repository.get_order_for_decision(key) == first
+    assert repository.get_order("order-2") is None
+
+
+@pytest.mark.parametrize("status", [OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELED])
+def test_decision_mapping_survives_terminal_order_update(repository, status) -> None:
+    key = decision_key()
+    pending = make_order()
+    terminal = pending.transition_to(status)
+    repository.register_order_submission(key, pending)
+
+    repository.save_order(terminal)
+
+    assert repository.get_order_for_decision(key) == terminal
+    assert repository.find_open_order_for_scope(key.scope) is None
+    assert repository.register_order_submission(key, pending) is False
+
+
+def test_open_order_lookup_is_isolated_by_full_scope(repository) -> None:
+    scopes = (
+        decision_key(),
+        decision_key(instrument=ETH),
+        decision_key(strategy_id="other"),
+        decision_key(timeframe="minute60"),
+    )
+    orders = (
+        make_order("btc-ma-day"),
+        make_order("eth-ma-day", instrument=ETH),
+        Order(
+            order_id="btc-other-day",
+            instrument=BTC,
+            side=OrderSide.BUY,
+            quantity=Decimal("0.01"),
+            strategy_id="other",
+            submitted_at=SUBMITTED_AT,
+        ),
+        make_order("btc-ma-minute"),
+    )
+    for key, order in zip(scopes, orders):
+        repository.register_order_submission(key, order)
+
+    for key, order in zip(scopes, orders):
+        assert repository.find_open_order_for_scope(key.scope) == order
+
+
+def test_save_execution_atomically_persists_filled_order_and_fill(repository) -> None:
+    key = decision_key()
+    pending = make_order()
+    filled = pending.transition_to(OrderStatus.FILLED)
+    fill = make_fill(order=pending)
+    repository.register_order_submission(key, pending)
+
+    repository.save_execution(filled, fill)
+
+    assert repository.get_order_for_decision(key) == filled
+    assert repository.get_fill(fill.fill_id) == fill
+
+
+def test_save_execution_persists_broker_rejection_without_fill(repository) -> None:
+    key = decision_key()
+    pending = make_order()
+    rejected = pending.transition_to(OrderStatus.REJECTED)
+    repository.register_order_submission(key, pending)
+
+    repository.save_execution(rejected, None)
+
+    assert repository.get_order_for_decision(key) == rejected
+    assert repository.list_fills() == ()
+
+
+def test_save_execution_rolls_back_order_update_when_fill_insert_fails(
+    repository,
+) -> None:
+    first_key = decision_key()
+    first_pending = make_order("order-1")
+    repository.register_order_submission(first_key, first_pending)
+    repository.save_execution(
+        first_pending.transition_to(OrderStatus.FILLED),
+        make_fill("shared-fill", order=first_pending),
+    )
+    second_key = decision_key(
+        timestamp=datetime(2026, 9, 25, tzinfo=timezone.utc)
+    )
+    second_pending = make_order("order-2")
+    repository.register_order_submission(second_key, second_pending)
+    conflicting_fill = make_fill(
+        "shared-fill",
+        order=second_pending,
+        fill_price=Decimal("60000000"),
+    )
+
+    with pytest.raises(ValueError, match="different fill data"):
+        repository.save_execution(
+            second_pending.transition_to(OrderStatus.FILLED),
+            conflicting_fill,
+        )
+
+    assert repository.get_order("order-2") == second_pending
+    assert repository.get_fill("shared-fill").order_id == "order-1"
+
+
+def test_decision_mapping_survives_repository_reopen(tmp_path) -> None:
+    database = tmp_path / "decision-restart.db"
+    first = SQLitePaperRepository(database)
+    first.initialize()
+    key = decision_key()
+    order = make_order()
+    first.register_order_submission(key, order)
+
+    second = SQLitePaperRepository(database)
+    second.initialize()
+
+    assert second.get_order_for_decision(key) == order
+    assert second.find_open_order_for_scope(key.scope) == order

@@ -6,7 +6,7 @@ from pathlib import Path
 from investing_plz.broker.models import ExecutionFill
 from investing_plz.domain import Instrument, Order, OrderSide, OrderStatus
 from investing_plz.domain.time import require_utc
-from investing_plz.storage.paper import PaperCursorScope
+from investing_plz.storage.paper import PaperCursorScope, PaperDecisionKey
 
 
 class SQLitePaperRepository:
@@ -53,6 +53,20 @@ class SQLitePaperRepository:
                     last_processed_bar_timestamp TEXT NOT NULL,
                     PRIMARY KEY (venue, symbol, strategy_id, timeframe)
                 );
+
+                CREATE TABLE IF NOT EXISTS paper_order_decisions (
+                    venue TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    strategy_id TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    closed_bar_timestamp TEXT NOT NULL,
+                    order_id TEXT NOT NULL UNIQUE,
+                    PRIMARY KEY (
+                        venue, symbol, strategy_id, timeframe,
+                        closed_bar_timestamp
+                    ),
+                    FOREIGN KEY (order_id) REFERENCES paper_orders(order_id)
+                );
                 """
             )
 
@@ -60,34 +74,7 @@ class SQLitePaperRepository:
         if not isinstance(order, Order):
             raise TypeError("order must be an Order")
         with self._connect() as connection:
-            row = connection.execute(
-                _SELECT_ORDER + " WHERE order_id = ?", (order.order_id,)
-            ).fetchone()
-            if row is None:
-                connection.execute(
-                    """
-                    INSERT INTO paper_orders (
-                        order_id, venue, symbol, side, quantity,
-                        strategy_id, submitted_at, status
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    _order_values(order),
-                )
-                return
-
-            stored = _row_to_order(row)
-            if _order_identity(stored) != _order_identity(order):
-                raise ValueError(
-                    f"order_id already exists with different order data: {order.order_id}"
-                )
-            if stored.status is order.status:
-                return
-            if stored.transition_to(order.status) != order:
-                raise ValueError(f"invalid persisted order update: {order.order_id}")
-            connection.execute(
-                "UPDATE paper_orders SET status = ? WHERE order_id = ?",
-                (order.status.value, order.order_id),
-            )
+            _save_order(connection, order)
 
     def get_order(self, order_id: str) -> Order | None:
         with self._connect() as connection:
@@ -111,6 +98,78 @@ class SQLitePaperRepository:
                 (OrderStatus.PENDING.value,),
             ).fetchall()
         return tuple(_row_to_order(row) for row in rows)
+
+    def register_order_submission(
+        self, decision_key: PaperDecisionKey, order: Order
+    ) -> bool:
+        _require_decision_key(decision_key)
+        if not isinstance(order, Order):
+            raise TypeError("order must be an Order")
+        if not order.is_open:
+            raise ValueError("submitted order must be open")
+        if order.instrument != decision_key.scope.instrument:
+            raise ValueError("order instrument must match decision scope")
+        if order.strategy_id != decision_key.scope.strategy_id:
+            raise ValueError("order strategy_id must match decision scope")
+
+        with self._connect() as connection:
+            row = connection.execute(
+                _SELECT_DECISION_ORDER + _DECISION_WHERE,
+                _decision_values(decision_key),
+            ).fetchone()
+            if row is not None:
+                stored = _row_to_order(row)
+                if _order_identity(stored) != _order_identity(order):
+                    raise ValueError(
+                        "decision is already linked to a different order"
+                    )
+                return False
+
+            _save_order(connection, order)
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO paper_order_decisions (
+                        venue, symbol, strategy_id, timeframe,
+                        closed_bar_timestamp, order_id
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (*_decision_values(decision_key), order.order_id),
+                )
+            except sqlite3.IntegrityError as error:
+                raise ValueError(
+                    "order is already linked to another decision"
+                ) from error
+            return True
+
+    def get_order_for_decision(
+        self, decision_key: PaperDecisionKey
+    ) -> Order | None:
+        _require_decision_key(decision_key)
+        with self._connect() as connection:
+            row = connection.execute(
+                _SELECT_DECISION_ORDER + _DECISION_WHERE,
+                _decision_values(decision_key),
+            ).fetchone()
+        return None if row is None else _row_to_order(row)
+
+    def find_open_order_for_scope(
+        self, scope: PaperCursorScope
+    ) -> Order | None:
+        _require_scope(scope)
+        with self._connect() as connection:
+            row = connection.execute(
+                _SELECT_DECISION_ORDER
+                + """
+                WHERE d.venue = ? AND d.symbol = ?
+                  AND d.strategy_id = ? AND d.timeframe = ?
+                  AND o.status = ?
+                ORDER BY o.submitted_at ASC, o.order_id ASC
+                LIMIT 1
+                """,
+                (*_scope_values(scope), OrderStatus.PENDING.value),
+            ).fetchone()
+        return None if row is None else _row_to_order(row)
 
     def save_fill(self, fill: ExecutionFill) -> bool:
         if not isinstance(fill, ExecutionFill):
@@ -154,6 +213,26 @@ class SQLitePaperRepository:
                 _SELECT_FILL + " ORDER BY filled_at ASC, fill_id ASC"
             ).fetchall()
         return tuple(_row_to_fill(row) for row in rows)
+
+    def save_execution(
+        self, order: Order, fill: ExecutionFill | None
+    ) -> None:
+        if not isinstance(order, Order):
+            raise TypeError("order must be an Order")
+        if fill is None:
+            if order.status is not OrderStatus.REJECTED:
+                raise ValueError("execution without a fill must be REJECTED")
+        else:
+            if not isinstance(fill, ExecutionFill):
+                raise TypeError("fill must be an ExecutionFill or None")
+            if order.status is not OrderStatus.FILLED:
+                raise ValueError("execution with a fill must be FILLED")
+            _validate_fill_matches_order(fill, order)
+
+        with self._connect() as connection:
+            _save_order(connection, order)
+            if fill is not None:
+                _save_fill(connection, fill)
 
     def get_last_processed_bar_timestamp(
         self, scope: PaperCursorScope
@@ -205,6 +284,19 @@ _SELECT_FILL = """
 SELECT fill_id, order_id, venue, symbol, side, quantity,
        fill_price, fee_amount, filled_at, strategy_id
 FROM paper_fills
+"""
+
+_SELECT_DECISION_ORDER = """
+SELECT o.order_id, o.venue, o.symbol, o.side, o.quantity,
+       o.strategy_id, o.submitted_at, o.status
+FROM paper_order_decisions AS d
+JOIN paper_orders AS o ON o.order_id = d.order_id
+"""
+
+_DECISION_WHERE = """
+WHERE d.venue = ? AND d.symbol = ?
+  AND d.strategy_id = ? AND d.timeframe = ?
+  AND d.closed_bar_timestamp = ?
 """
 
 
@@ -285,3 +377,86 @@ def _scope_values(scope: PaperCursorScope) -> tuple[str, str, str, str]:
 def _require_scope(scope: PaperCursorScope) -> None:
     if not isinstance(scope, PaperCursorScope):
         raise TypeError("scope must be a PaperCursorScope")
+
+
+def _require_decision_key(decision_key: PaperDecisionKey) -> None:
+    if not isinstance(decision_key, PaperDecisionKey):
+        raise TypeError("decision_key must be a PaperDecisionKey")
+
+
+def _decision_values(
+    decision_key: PaperDecisionKey,
+) -> tuple[str, str, str, str, str]:
+    return (
+        *_scope_values(decision_key.scope),
+        decision_key.closed_bar_timestamp.isoformat(),
+    )
+
+
+def _save_order(connection: sqlite3.Connection, order: Order) -> None:
+    row = connection.execute(
+        _SELECT_ORDER + " WHERE order_id = ?", (order.order_id,)
+    ).fetchone()
+    if row is None:
+        connection.execute(
+            """
+            INSERT INTO paper_orders (
+                order_id, venue, symbol, side, quantity,
+                strategy_id, submitted_at, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _order_values(order),
+        )
+        return
+
+    stored = _row_to_order(row)
+    if _order_identity(stored) != _order_identity(order):
+        raise ValueError(
+            f"order_id already exists with different order data: {order.order_id}"
+        )
+    if stored.status is order.status:
+        return
+    if stored.transition_to(order.status) != order:
+        raise ValueError(f"invalid persisted order update: {order.order_id}")
+    connection.execute(
+        "UPDATE paper_orders SET status = ? WHERE order_id = ?",
+        (order.status.value, order.order_id),
+    )
+
+
+def _save_fill(connection: sqlite3.Connection, fill: ExecutionFill) -> bool:
+    row = connection.execute(
+        _SELECT_FILL + " WHERE fill_id = ?", (fill.fill_id,)
+    ).fetchone()
+    if row is not None:
+        if _row_to_fill(row) != fill:
+            raise ValueError(
+                f"fill_id already exists with different fill data: {fill.fill_id}"
+            )
+        return False
+    try:
+        connection.execute(
+            """
+            INSERT INTO paper_fills (
+                fill_id, order_id, venue, symbol, side, quantity,
+                fill_price, fee_amount, filled_at, strategy_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _fill_values(fill),
+        )
+    except sqlite3.IntegrityError as error:
+        raise ValueError(
+            f"fill references an unknown order_id: {fill.order_id}"
+        ) from error
+    return True
+
+
+def _validate_fill_matches_order(fill: ExecutionFill, order: Order) -> None:
+    if (
+        fill.order_id != order.order_id
+        or fill.instrument != order.instrument
+        or fill.side is not order.side
+        or fill.quantity != order.quantity
+        or fill.strategy_id != order.strategy_id
+    ):
+        raise ValueError("fill must match its executed order")
