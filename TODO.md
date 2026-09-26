@@ -127,7 +127,7 @@
 - [ ] real clock과 polling scheduler를 구현하고 fake clock으로 주기를 테스트한다.
 - [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
 - [x] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
-- [ ] Broker protocol을 정의하고 메모리 fake로 주문·체결 contract를 테스트한다.
+- [x] Broker protocol을 정의하고 메모리 fake로 주문 contract를 테스트한다.
 - [ ] 수수료 모델 port를 구현하고 Upbit fee fixture를 테스트한다.
 - [ ] slippage 모델 port를 구현하고 0/고정 slippage를 테스트한다.
 - [ ] paper broker와 simulated 주문 생명주기를 구현하고 Broker contract suite를 통과시킨다.
