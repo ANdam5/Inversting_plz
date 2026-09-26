@@ -1,6 +1,7 @@
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from decimal import Decimal
+import logging
 
 from investing_plz.broker.memory import InMemoryBroker
 from investing_plz.broker.models import ExecutionFill
@@ -13,6 +14,10 @@ from investing_plz.execution import (
     validate_fee_rate,
     validate_slippage_bps,
 )
+from investing_plz.structured_logging import log_event
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class PaperBroker(InMemoryBroker):
@@ -136,12 +141,28 @@ class PaperBroker(InMemoryBroker):
         if order.side is OrderSide.BUY:
             new_cash = self._cash - notional - fill.fee_amount
             if new_cash < 0:
-                self._replace_order(order.transition_to(OrderStatus.REJECTED))
+                rejected = order.transition_to(OrderStatus.REJECTED)
+                self._replace_order(rejected)
+                log_event(
+                    _LOGGER,
+                    "paper.order_rejected",
+                    order_id=order.order_id,
+                    order_status=rejected.status.value,
+                    reason="insufficient_cash",
+                )
                 return None
             new_position = current_position + fill.quantity
         else:
             if fill.quantity > current_position:
-                self._replace_order(order.transition_to(OrderStatus.REJECTED))
+                rejected = order.transition_to(OrderStatus.REJECTED)
+                self._replace_order(rejected)
+                log_event(
+                    _LOGGER,
+                    "paper.order_rejected",
+                    order_id=order.order_id,
+                    order_status=rejected.status.value,
+                    reason="insufficient_position",
+                )
                 return None
             new_cash = self._cash + notional - fill.fee_amount
             new_position = current_position - fill.quantity
@@ -150,6 +171,15 @@ class PaperBroker(InMemoryBroker):
         self._fills[fill.fill_id] = fill
         self._cash = new_cash
         self._positions[order.instrument] = new_position
+        log_event(
+            _LOGGER,
+            "paper.order_filled",
+            instrument=str(order.instrument),
+            strategy_id=order.strategy_id,
+            order_id=order.order_id,
+            fill_id=fill.fill_id,
+            order_status=filled_order.status.value,
+        )
         return fill
 
     def list_fills(self) -> tuple[ExecutionFill, ...]:
@@ -161,4 +191,11 @@ class PaperBroker(InMemoryBroker):
             raise KeyError(f"order not found: {order_id}")
         rejected = order.transition_to(OrderStatus.REJECTED)
         self._replace_order(rejected)
+        log_event(
+            _LOGGER,
+            "paper.order_rejected",
+            order_id=rejected.order_id,
+            order_status=rejected.status.value,
+            reason="explicit_rejection",
+        )
         return rejected

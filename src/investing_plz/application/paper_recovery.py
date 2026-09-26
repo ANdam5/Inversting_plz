@@ -2,9 +2,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+import logging
 
 from investing_plz.broker import PaperBroker
 from investing_plz.storage.paper import PaperCursorScope, PaperRepository
+from investing_plz.structured_logging import log_event
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,9 +39,24 @@ def recover_paper_runtime(
         order_id_factory=order_id_factory,
         submitted_at_factory=submitted_at_factory,
     )
-    return PaperRecoveryResult(
+    result = PaperRecoveryResult(
         broker=broker,
         last_processed_bar_timestamp=(
             repository.get_last_processed_bar_timestamp(scope)
         ),
     )
+    log_event(
+        _LOGGER,
+        "paper.runtime_recovered",
+        instrument=str(scope.instrument),
+        strategy_id=scope.strategy_id,
+        timeframe=scope.timeframe,
+        order_count=len(broker.list_orders()),
+        fill_count=len(broker.list_fills()),
+        bar_timestamp=(
+            None
+            if result.last_processed_bar_timestamp is None
+            else result.last_processed_bar_timestamp.isoformat()
+        ),
+    )
+    return result

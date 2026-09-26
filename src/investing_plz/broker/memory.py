@@ -1,7 +1,12 @@
 from collections.abc import Callable
 from datetime import datetime
+import logging
 
 from investing_plz.domain import Order, OrderIntent, OrderStatus
+from investing_plz.structured_logging import log_event
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class InMemoryBroker:
@@ -28,6 +33,14 @@ class InMemoryBroker:
         if order.order_id in self._orders:
             raise ValueError(f"duplicate order_id: {order.order_id}")
         self._orders[order.order_id] = order
+        log_event(
+            _LOGGER,
+            "paper.order_submitted",
+            instrument=str(order.instrument),
+            strategy_id=order.strategy_id,
+            order_id=order.order_id,
+            order_status=order.status.value,
+        )
         return order
 
     def get_order(self, order_id: str) -> Order | None:
@@ -45,6 +58,12 @@ class InMemoryBroker:
             raise KeyError(f"order not found: {order_id}")
         canceled = order.transition_to(OrderStatus.CANCELED)
         self._replace_order(canceled)
+        log_event(
+            _LOGGER,
+            "paper.order_canceled",
+            order_id=canceled.order_id,
+            order_status=canceled.status.value,
+        )
         return canceled
 
     def _replace_order(self, order: Order) -> None:

@@ -1,6 +1,7 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
+import logging
 
 from investing_plz.application.position_sizing import (
     create_target_weight_order_intent,
@@ -17,6 +18,10 @@ from investing_plz.storage.paper import (
     PaperRepository,
 )
 from investing_plz.strategy import Signal, SignalType, Strategy
+from investing_plz.structured_logging import log_event
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +69,14 @@ def run_paper_cycle(
         raise ValueError("strategy signal instrument must match the paper session")
 
     if signal.signal_type is SignalType.NEUTRAL:
+        log_event(
+            _LOGGER,
+            "paper.neutral_no_order",
+            instrument=str(instrument),
+            strategy_id=signal.strategy_id,
+            timeframe=bars[-1].interval,
+            bar_timestamp=bars[-1].timestamp.isoformat(),
+        )
         return PaperCycleResult(signal, None, None, None, None)
 
     desired_target_weight = (
@@ -85,11 +98,13 @@ def run_paper_cycle(
         quantity_step=quantity_step,
     )
     if intent is None:
+        log_event(_LOGGER, "paper.no_order_required", strategy_id=signal.strategy_id)
         return PaperCycleResult(signal, None, None, None, None)
     if (
         intent.side is OrderSide.BUY
         and intent.quantity * execution_reference_price < min_trade_amount
     ):
+        log_event(_LOGGER, "paper.minimum_trade_blocked", strategy_id=signal.strategy_id)
         return PaperCycleResult(signal, intent, None, None, None)
 
     decision = risk_manager.evaluate(
@@ -104,7 +119,19 @@ def run_paper_cycle(
         risk_limits,
     )
     if decision.approved_intent is None:
+        log_event(
+            _LOGGER,
+            "paper.risk_rejected",
+            strategy_id=signal.strategy_id,
+            risk_status=decision.status.value,
+        )
         return PaperCycleResult(signal, intent, decision, None, None)
+    log_event(
+        _LOGGER,
+        "paper.risk_decision",
+        strategy_id=signal.strategy_id,
+        risk_status=decision.status.value,
+    )
 
     decision_scope = PaperCursorScope(
         instrument=instrument,
@@ -118,9 +145,21 @@ def run_paper_cycle(
     if repository is not None:
         existing = repository.get_order_for_decision(decision_key)
         if existing is not None:
+            log_event(
+                _LOGGER,
+                "paper.duplicate_decision_blocked",
+                order_id=existing.order_id,
+                order_status=existing.status.value,
+            )
             return PaperCycleResult(signal, intent, decision, existing, None)
         pending = repository.find_open_order_for_scope(decision_scope)
         if pending is not None:
+            log_event(
+                _LOGGER,
+                "paper.pending_order_blocked",
+                order_id=pending.order_id,
+                order_status=pending.status.value,
+            )
             return PaperCycleResult(signal, intent, decision, pending, None)
 
     submitted = broker.submit(decision.approved_intent)
@@ -136,6 +175,13 @@ def run_paper_cycle(
     assert final_order is not None
     if repository is not None:
         repository.save_execution(final_order, fill)
+        log_event(
+            _LOGGER,
+            "paper.execution_persisted",
+            order_id=final_order.order_id,
+            fill_id=None if fill is None else fill.fill_id,
+            order_status=final_order.status.value,
+        )
     return PaperCycleResult(signal, intent, decision, final_order, fill)
 
 

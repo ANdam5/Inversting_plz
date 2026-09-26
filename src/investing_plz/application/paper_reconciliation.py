@@ -1,11 +1,16 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+import logging
 from typing import TypeVar
 
 from investing_plz.broker import PaperBroker
 from investing_plz.broker.paper_account import project_paper_account
 from investing_plz.domain.time import require_utc
 from investing_plz.storage.paper import PaperCursorScope, PaperRepository
+from investing_plz.structured_logging import log_event
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,7 +42,11 @@ def reconcile_paper_runtime(
         repository_fills = repository.list_fills()
         decisions = repository.list_order_decisions()
     except (TypeError, ValueError) as error:
-        return PaperReconciliationResult((f"repository state is invalid: {error}",))
+        result = PaperReconciliationResult(
+            (f"repository state is invalid: {error}",)
+        )
+        _log_reconciliation(result)
+        return result
 
     broker_orders = broker.list_orders()
     broker_fills = broker.list_fills()
@@ -120,7 +129,9 @@ def reconcile_paper_runtime(
         except (TypeError, ValueError) as error:
             issues.append(f"cursor state is invalid: {error}")
 
-    return PaperReconciliationResult(tuple(issues))
+    result = PaperReconciliationResult(tuple(issues))
+    _log_reconciliation(result)
+    return result
 
 
 ResultT = TypeVar("ResultT")
@@ -164,4 +175,16 @@ def _format_positions(positions) -> str:
         for instrument, quantity in sorted(
             positions.items(), key=lambda item: (item[0].venue, item[0].symbol)
         )
+    )
+
+
+def _log_reconciliation(result: PaperReconciliationResult) -> None:
+    log_event(
+        _LOGGER,
+        (
+            "paper.reconciliation_safe"
+            if result.is_safe_to_trade
+            else "paper.reconciliation_unsafe"
+        ),
+        issues=result.issues,
     )

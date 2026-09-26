@@ -2,12 +2,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
+import logging
 
 from investing_plz.application.paper_cycle import PaperCycleResult
 from investing_plz.application.paper_safety import PaperSafetyResult
 from investing_plz.clock import Clock
 from investing_plz.domain import Bar
 from investing_plz.domain.time import require_utc
+from investing_plz.structured_logging import correlation_context, log_event
 
 
 ClosedBarsProvider = Callable[[], Sequence[Bar]]
@@ -15,6 +17,10 @@ ExecutionPriceProvider = Callable[[], Decimal]
 PaperCycleRunner = Callable[[Sequence[Bar], Decimal], PaperCycleResult]
 CursorSaver = Callable[[datetime], None]
 SafetyEvaluator = Callable[[Bar | None, datetime], PaperSafetyResult]
+CorrelationIdFactory = Callable[[], str]
+
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +47,7 @@ class PaperPollingScheduler:
         initial_last_processed_bar_timestamp: datetime | None = None,
         cursor_saver: CursorSaver | None = None,
         safety_evaluator: SafetyEvaluator | None = None,
+        correlation_id_factory: CorrelationIdFactory | None = None,
     ) -> None:
         if poll_interval <= timedelta(0):
             raise ValueError("poll_interval must be greater than zero")
@@ -51,6 +58,7 @@ class PaperPollingScheduler:
         self._cycle_runner = cycle_runner
         self._cursor_saver = cursor_saver
         self._safety_evaluator = safety_evaluator
+        self._correlation_id_factory = correlation_id_factory
         self._next_poll_at: datetime | None = None
         self._last_processed_bar_timestamp = (
             None
@@ -89,31 +97,86 @@ class PaperPollingScheduler:
         ):
             return PaperPollResult(True, True, newest_timestamp, False, None)
 
-        safety_result = (
+        correlation_id = (
             None
-            if self._safety_evaluator is None
-            else self._safety_evaluator(bars[-1], now)
+            if self._correlation_id_factory is None
+            else self._correlation_id_factory()
         )
-        if safety_result is not None and not safety_result.is_safe_to_trade:
+        context = (
+            correlation_context(correlation_id)
+            if correlation_id is not None
+            else _null_correlation_context()
+        )
+        with context:
+            latest = bars[-1]
+            log_event(
+                _LOGGER,
+                "paper.new_closed_bar_detected",
+                instrument=str(latest.instrument),
+                timeframe=latest.interval,
+                bar_timestamp=latest.timestamp.isoformat(),
+            )
+            safety_result = (
+                None
+                if self._safety_evaluator is None
+                else self._safety_evaluator(latest, now)
+            )
+            if safety_result is not None and not safety_result.is_safe_to_trade:
+                log_event(
+                    _LOGGER,
+                    "paper.safety_blocked",
+                    instrument=str(latest.instrument),
+                    timeframe=latest.interval,
+                    bar_timestamp=latest.timestamp.isoformat(),
+                    issues=safety_result.issues,
+                )
+                return PaperPollResult(
+                    True, True, newest_timestamp, False, None, safety_result
+                )
+
+            log_event(
+                _LOGGER,
+                "paper.cycle_started",
+                instrument=str(latest.instrument),
+                timeframe=latest.interval,
+                bar_timestamp=latest.timestamp.isoformat(),
+            )
+            try:
+                reference_price = self._execution_price_provider()
+                cycle_result = self._cycle_runner(bars, reference_price)
+                if self._cursor_saver is not None:
+                    self._cursor_saver(newest_timestamp)
+            except Exception:
+                log_event(
+                    _LOGGER,
+                    "paper.cycle_failed",
+                    instrument=str(latest.instrument),
+                    timeframe=latest.interval,
+                    bar_timestamp=latest.timestamp.isoformat(),
+                )
+                raise
+            self._last_processed_bar_timestamp = newest_timestamp
+            log_event(
+                _LOGGER,
+                "paper.cycle_completed",
+                instrument=str(latest.instrument),
+                timeframe=latest.interval,
+                bar_timestamp=latest.timestamp.isoformat(),
+                order_id=(
+                    None if cycle_result.order is None else cycle_result.order.order_id
+                ),
+                fill_id=(
+                    None if cycle_result.fill is None else cycle_result.fill.fill_id
+                ),
+            )
             return PaperPollResult(
-                True,
-                True,
-                newest_timestamp,
-                False,
-                None,
-                safety_result,
+                True, True, newest_timestamp, True, cycle_result, safety_result
             )
 
-        reference_price = self._execution_price_provider()
-        cycle_result = self._cycle_runner(bars, reference_price)
-        if self._cursor_saver is not None:
-            self._cursor_saver(newest_timestamp)
-        self._last_processed_bar_timestamp = newest_timestamp
-        return PaperPollResult(
-            True,
-            True,
-            newest_timestamp,
-            True,
-            cycle_result,
-            safety_result,
-        )
+
+class _null_correlation_context:
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        return None
