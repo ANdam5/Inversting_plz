@@ -1,16 +1,25 @@
 import argparse
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+import logging
 
 from investing_plz.adapters.upbit import UpbitMarketDataProvider
 from investing_plz.application.collect import collect_bars
+from investing_plz.application import run_paper_runtime
 from investing_plz.backtest import BacktestConfig, run_backtest
 from investing_plz.domain import Instrument
+from investing_plz.clock import SystemClock
 from investing_plz.risk import RiskLimits
 from investing_plz.strategy import MovingAverageCrossoverStrategy
-from investing_plz.storage import SQLiteBarStore
+from investing_plz.storage import PaperSessionConfig, SQLiteBarStore, SQLitePaperRepository
+from investing_plz.runtime_identity import (
+    new_paper_correlation_id,
+    new_paper_fill_id,
+    new_paper_order_id,
+)
+from investing_plz.structured_logging import configure_structured_logging
 
 
 def _utc_now() -> datetime:
@@ -73,12 +82,99 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="print simulated fill details after the summary",
     )
+
+    paper = commands.add_parser("paper", help="run public-data paper trading")
+    paper.add_argument("--venue", required=True, choices=["upbit"])
+    paper.add_argument("--symbol", required=True)
+    paper.add_argument("--timeframe", required=True, choices=["day"])
+    paper.add_argument(
+        "--strategy-id",
+        default=MovingAverageCrossoverStrategy.strategy_id,
+        choices=[MovingAverageCrossoverStrategy.strategy_id],
+    )
+    paper.add_argument("--fast", type=int, default=20)
+    paper.add_argument("--slow", type=int, default=60)
+    paper.add_argument("--initial-cash", type=Decimal, default=Decimal("10000000"))
+    paper.add_argument("--target-weight", type=Decimal, default=Decimal("0.10"))
+    paper.add_argument("--quantity-step", type=Decimal, default=Decimal("0.00000001"))
+    paper.add_argument("--min-trade-amount", type=Decimal, default=Decimal("10000"))
+    paper.add_argument("--max-order-amount", type=Decimal, default=Decimal("500000"))
+    paper.add_argument("--max-instrument-weight", type=Decimal, default=Decimal("0.20"))
+    paper.add_argument("--min-cash-reserve", type=Decimal, default=Decimal("1000000"))
+    paper.add_argument("--fee-rate", type=Decimal, default=Decimal("0"))
+    paper.add_argument("--slippage-bps", type=Decimal, default=Decimal("0"))
+    paper.add_argument("--paper-database", type=Path, default=Path("data/paper.db"))
+    paper.add_argument("--poll-interval-seconds", type=float, default=60.0)
+    paper.add_argument("--max-data-delay-seconds", type=float, default=3600.0)
+    paper.add_argument("--loop-sleep-seconds", type=float, default=0.25)
+    paper.add_argument("--timeout", type=float, default=10.0)
+    paper.add_argument("--enable-trading", action="store_true")
+    paper.add_argument("--once", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     instrument = Instrument(venue=args.venue, symbol=args.symbol)
+    if args.command == "paper":
+        configure_structured_logging(logging.INFO)
+        session_config = PaperSessionConfig(
+            instrument=instrument,
+            strategy_id=args.strategy_id,
+            timeframe=args.timeframe,
+            fast_window=args.fast,
+            slow_window=args.slow,
+            initial_cash=args.initial_cash,
+            target_weight=args.target_weight,
+            quantity_step=args.quantity_step,
+            min_trade_amount=args.min_trade_amount,
+            max_order_amount=args.max_order_amount,
+            max_instrument_weight=args.max_instrument_weight,
+            min_cash_reserve=args.min_cash_reserve,
+            fee_rate=args.fee_rate,
+            slippage_bps=args.slippage_bps,
+        )
+        # One latest daily candle may still be open, in addition to the
+        # strategy's required closed-bar history.
+        pages = (session_config.slow_window + 2 + 199) // 200
+        provider = UpbitMarketDataProvider(
+            timeout=args.timeout,
+            max_pages=pages,
+        )
+        clock = SystemClock()
+        result = run_paper_runtime(
+            session_config,
+            repository=SQLitePaperRepository(args.paper_database),
+            market_data=provider,
+            clock=clock,
+            poll_interval=timedelta(seconds=args.poll_interval_seconds),
+            max_data_delay=timedelta(seconds=args.max_data_delay_seconds),
+            trading_enabled=args.enable_trading,
+            once=args.once,
+            order_id_factory=new_paper_order_id,
+            fill_id_factory=new_paper_fill_id,
+            correlation_id_factory=new_paper_correlation_id,
+            submitted_at_factory=clock.now,
+            loop_sleep_seconds=args.loop_sleep_seconds,
+        )
+        output = {
+            "instrument": f"{instrument.venue}:{instrument.symbol}",
+            "strategy_id": session_config.strategy_id,
+            "paper_database": args.paper_database,
+            "session": "new" if result.session_created else "recovered",
+            "cash": result.cash,
+            "position_quantity": result.position_quantity,
+            "last_processed_bar_timestamp": (
+                None
+                if result.last_processed_bar_timestamp is None
+                else result.last_processed_bar_timestamp.isoformat()
+            ),
+            "reconciliation_safe": result.reconciliation_safe,
+            "trading_enabled": result.trading_enabled,
+        }
+        for key, value in output.items():
+            print(f"{key}={value}")
+        return 0
     if args.command == "summary":
         summary = SQLiteBarStore(args.database).summarize(
             instrument,

@@ -1,4 +1,5 @@
 import logging
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -35,3 +36,39 @@ def log_event(logger: logging.Logger, event: str, **context: object) -> None:
     except Exception:
         # Observability must not change trading state or execution semantics.
         return
+
+
+class StructuredLogFormatter(logging.Formatter):
+    _fields = (
+        "event",
+        "correlation_id",
+        "instrument",
+        "strategy_id",
+        "timeframe",
+        "bar_timestamp",
+        "order_id",
+        "fill_id",
+        "order_status",
+        "issues",
+        "reason",
+    )
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for field in self._fields:
+            if hasattr(record, field):
+                payload[field] = getattr(record, field)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def configure_structured_logging(level: int = logging.INFO) -> None:
+    handler = logging.StreamHandler()
+    handler.setFormatter(StructuredLogFormatter())
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(level)

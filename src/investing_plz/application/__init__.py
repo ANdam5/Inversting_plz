@@ -26,6 +26,10 @@ from investing_plz.application.paper_safety import (
     PaperSafetyResult,
     evaluate_paper_safety,
 )
+from investing_plz.application.paper_runtime import (
+    PaperRuntimeResult,
+    run_paper_runtime,
+)
 from investing_plz.runtime_identity import (
     new_paper_correlation_id,
     new_paper_fill_id,
@@ -42,11 +46,13 @@ __all__ = [
     "PaperTradingNotReadyError",
     "ManualKillSwitch",
     "PaperSafetyResult",
+    "PaperRuntimeResult",
     "evaluate_paper_safety",
     "reconcile_paper_runtime",
     "recover_paper_runtime",
     "run_when_paper_ready",
     "run_paper_cycle",
+    "run_paper_runtime",
     "new_paper_correlation_id",
     "new_paper_fill_id",
     "new_paper_order_id",

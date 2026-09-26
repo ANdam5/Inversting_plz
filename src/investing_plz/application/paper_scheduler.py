@@ -83,6 +83,12 @@ class PaperPollingScheduler:
                 if self._safety_evaluator is None
                 else self._safety_evaluator(None, now)
             )
+            if safety_result is not None and not safety_result.is_safe_to_trade:
+                log_event(
+                    _LOGGER,
+                    "paper.safety_blocked",
+                    issues=safety_result.issues,
+                )
             return PaperPollResult(
                 True, True, None, False, None, safety_result
             )

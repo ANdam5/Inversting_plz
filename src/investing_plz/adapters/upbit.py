@@ -105,6 +105,29 @@ class UpbitMarketDataProvider:
         bars = [bar for bar in all_bars if since is None or bar.timestamp > since]
         return sorted(bars, key=lambda bar: bar.timestamp)
 
+    def get_current_price(self, instrument: Instrument) -> Decimal:
+        """Return the current public Upbit trade price without authentication."""
+
+        if instrument.venue.lower() != "upbit":
+            raise ValueError("Upbit provider requires an upbit instrument")
+        query = urlencode({"markets": instrument.symbol})
+        request = Request(
+            f"{self._base_url}/ticker?{query}",
+            headers={"Accept": "application/json", "User-Agent": "investing-plz/0.1"},
+        )
+        payload = self._open_json(request)
+        try:
+            if not isinstance(payload, list) or len(payload) != 1:
+                raise ValueError("ticker response must contain one item")
+            price = Decimal(str(payload[0]["trade_price"]))
+            if price <= 0:
+                raise ValueError("trade_price must be greater than zero")
+            return price
+        except (KeyError, TypeError, ValueError, ArithmeticError) as error:
+            raise MarketDataValidationError(
+                f"invalid Upbit ticker: {error}"
+            ) from error
+
     def _request_page(
         self, instrument: Instrument, cursor: datetime | None
     ) -> list[dict[str, Any]]:
@@ -119,9 +142,15 @@ class UpbitMarketDataProvider:
             f"{self._base_url}/candles/days?{query}",
             headers={"Accept": "application/json", "User-Agent": "investing-plz/0.1"},
         )
+        payload = self._open_json(request)
+        if not isinstance(payload, list):
+            raise MarketDataValidationError("Upbit candle response must be a list")
+        return payload
+
+    def _open_json(self, request: Request) -> Any:
         try:
             with self._opener(request, timeout=self._timeout) as response:
-                payload = response.read().decode("utf-8")
+                payload_text = response.read().decode("utf-8")
         except HTTPError as error:
             if error.code == 429:
                 raise MarketDataRateLimitError(
@@ -137,12 +166,9 @@ class UpbitMarketDataProvider:
             raise MarketDataProviderError(f"Upbit request failed: {error.reason}") from error
 
         try:
-            candles = json.loads(payload)
+            return json.loads(payload_text)
         except json.JSONDecodeError as error:
             raise MarketDataValidationError("Upbit returned invalid JSON") from error
-        if not isinstance(candles, list):
-            raise MarketDataValidationError("Upbit candle response must be a list")
-        return candles
 
 
 def _validate_upbit_page_order(bars: Sequence[Bar]) -> None:

@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -53,3 +54,16 @@ def test_provider_returns_bars_in_time_order() -> None:
 
     assert bars[0].timestamp < bars[1].timestamp
 
+
+def test_provider_returns_public_current_price_as_decimal() -> None:
+    payload = json.dumps([{"market": "KRW-BTC", "trade_price": 123456.75}]).encode()
+    opener = Mock(return_value=FakeResponse(payload))
+    provider = UpbitMarketDataProvider(timeout=2.0, opener=opener)
+
+    price = provider.get_current_price(Instrument("upbit", "KRW-BTC"))
+
+    assert price == Decimal("123456.75")
+    assert isinstance(price, Decimal)
+    request = opener.call_args.args[0]
+    assert request.full_url == "https://api.upbit.com/v1/ticker?markets=KRW-BTC"
+    assert opener.call_args.kwargs == {"timeout": 2.0}
