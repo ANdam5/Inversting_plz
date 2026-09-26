@@ -125,7 +125,7 @@
 
 - [x] Clock protocol과 fixed/system clock을 정의하고 UTC 시간 결정론을 테스트한다.
 - [x] polling scheduler를 구현하고 fake clock으로 주기와 in-memory 중복 Bar 차단을 테스트한다.
-- [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
+- [x] Paper Order·Fill·cursor repository protocol과 SQLite 구현의 재개방 round-trip을 테스트한다.
 - [x] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
 - [x] Broker protocol을 정의하고 메모리 fake로 주문 contract를 테스트한다.
 - [ ] 수수료 모델 port를 구현하고 Upbit fee fixture를 테스트한다.
@@ -135,7 +135,8 @@
 - [x] closed Bar부터 PaperBroker 실행까지 단일 paper cycle을 연결하고 테스트한다.
 - [ ] 주문 idempotency key 생성을 구현하고 재처리 시 동일 키를 테스트한다.
 - [ ] 동일 Intent 재처리 및 중복 미체결 주문 제출 차단을 테스트한다.
-- [ ] 주문·체결 이벤트 영속화를 구현하고 재시작 복구를 테스트한다.
+- [x] Paper Order·Fill·cursor SQLite persistence foundation을 구현한다.
+- [ ] 영속 상태를 Paper 실행에 연결하고 재시작 복구를 테스트한다.
 - [ ] 저장 상태와 broker 상태 reconciliation을 구현하고 불일치 시나리오를 테스트한다.
 - [ ] stale market data 차단 규칙을 구현하고 신규 주문 거부를 테스트한다.
 - [ ] 구조화 로그에 run/order correlation ID를 추가하고 로그 capture로 테스트한다.
