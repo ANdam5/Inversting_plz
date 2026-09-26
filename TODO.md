@@ -124,7 +124,7 @@
 ## M4 — Paper Trading
 
 - [x] Clock protocol과 fixed/system clock을 정의하고 UTC 시간 결정론을 테스트한다.
-- [ ] polling scheduler를 구현하고 fake clock으로 주기를 테스트한다.
+- [x] polling scheduler를 구현하고 fake clock으로 주기와 in-memory 중복 Bar 차단을 테스트한다.
 - [ ] Storage repository protocol을 현재 Bar·주문·체결 요구사항에서 추출하고 로컬 구현 contract test를 작성한다.
 - [x] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
 - [x] Broker protocol을 정의하고 메모리 fake로 주문 contract를 테스트한다.
