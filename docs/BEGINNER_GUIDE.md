@@ -38,15 +38,25 @@ Upbit
 - 20일·60일 이동평균의 실제 교차 시점에 Strategy Signal 만들기
 - signal 명령으로 최신 closed Bar 기준 판단 확인하기
 - closed Bar를 시간순으로 재생하는 결정론적 Backtest 실행하기
-- 다음 Bar open에서 가상 체결하고 단일 종목 가상 현금·수량 확인하기
+- 다음 Bar open에서 가상 체결하고 target-state 방식으로 포지션 조정하기
+- fee와 deterministic slippage를 반영해 현금·수량·평균단가 계산하기
+- 실현손익과 현재 가격 기준 미실현손익 계산하기
+- Equity Curve, Total Return, CAGR, MDD 확인하기
+- Passive 10%와 BTC 100% Buy & Hold benchmark 계산하기
+- Fill을 완료된 position lifecycle인 ClosedTrade로 묶고 Trade Metrics 계산하기
+- Backtest 실행조건 metadata와 deterministic fingerprint 만들기
 
 ### 현재 불가능한 것
 
-- 수수료·slippage를 반영한 현실적인 성과 분석
-- 평균단가, 실현손익, MDD 같은 상세 지표 계산
-- 실제 거래소 Order 생성 또는 제출
+- 실제 Order와 OrderStatus lifecycle 관리
+- Broker 또는 PaperBroker를 통한 주문 제출
+- Clock abstraction을 사용한 실시간 polling
+- 주문·체결 영속화와 재시작 복구
+- 저장 상태와 Broker 상태 reconciliation
+- 주문 idempotency와 중복 미체결 주문 차단
+- 운영 kill switch
 - Paper Trading
-- 실제 투자
+- Live Trading과 실제 투자
 - 실제 계좌 Portfolio 관리
 - AI 또는 뉴스 분석
 
@@ -83,7 +93,13 @@ Inversting_plz/
 │  ├─ backtest/
 │  │  ├─ __init__.py              # Backtest 공개 이름 모음
 │  │  ├─ models.py                # 설정, Fill, 가상 Portfolio, 결과 모델
-│  │  └─ runner.py                # closed Bar를 순서대로 재생하는 실행기
+│  │  ├─ runner.py                # closed Bar를 순서대로 재생하는 실행기
+│  │  ├─ costs.py                 # fee와 deterministic slippage 계산
+│  │  ├─ metrics.py               # Total Return, CAGR, MDD 계산
+│  │  ├─ benchmark.py             # Passive 10%와 BTC Buy & Hold 비교
+│  │  ├─ trades.py                # Fill을 ClosedTrade lifecycle로 변환
+│  │  ├─ trade_metrics.py         # 종료된 Trade의 집계 지표 계산
+│  │  └─ metadata.py              # 실행조건 metadata와 fingerprint
 │  ├─ domain/
 │  │  ├─ __init__.py              # 주요 domain 모델 공개
 │  │  ├─ instrument.py            # 거래소와 종목을 나타내는 Instrument
@@ -102,6 +118,7 @@ Inversting_plz/
 │     ├─ __init__.py              # Strategy 관련 공개 이름 모음
 │     ├─ protocol.py              # Strategy가 따라야 하는 최소 약속
 │     ├─ signal.py                # Signal과 bullish/bearish/neutral 유형
+│     ├─ profile.py               # Instrument별 Strategy 설정과 병합 규칙
 │     └─ moving_average_crossover.py # MA 교차 규칙과 계산 결과
 │  ├─ risk/
 │  │  ├─ __init__.py              # Risk 관련 공개 이름 모음
@@ -119,6 +136,14 @@ Inversting_plz/
    ├─ test_bar.py
    ├─ test_backtest.py             # next-bar 체결, Risk, Portfolio, 결정론 검사
    ├─ test_backtest_cli.py         # SQLite→Backtest→출력 전체 흐름 검사
+   ├─ test_backtest_costs.py       # fee/slippage와 현금 회계 검사
+   ├─ test_backtest_metrics.py     # Equity Curve, Return, CAGR, MDD 검사
+   ├─ test_passive_benchmark.py    # 두 passive benchmark 검사
+   ├─ test_portfolio_accounting.py # 평균단가와 실현·미실현손익 검사
+   ├─ test_closed_trades.py        # position lifecycle ledger 검사
+   ├─ test_trade_metrics.py        # ClosedTrade 집계 지표 검사
+   ├─ test_backtest_metadata.py    # 실행조건 기록과 round-trip 검사
+   ├─ test_backtest_fingerprint.py # fingerprint와 반복 실행 재현성 검사
    ├─ test_cli.py
    ├─ test_closed_candles.py
    ├─ test_collect.py
@@ -389,6 +414,14 @@ KRW-ETH
 
 `MovingAverageCrossoverParameters`는 fast와 slow가 양수인지, fast가 slow보다 작은지 Profile 생성 시 검사한다. `create_strategy_from_profile()`은 이 값을 `MovingAverageCrossoverStrategy`에 전달한다.
 
+Parameter가 여러 곳에 있으면 현재 코드는 아래 순서로 최종 값을 정한다. 오른쪽 값일수록 우선한다.
+
+```text
+default < instrument/profile < runtime override
+```
+
+Runtime override는 fast 또는 slow 하나만 바꿀 수도 있다. 병합이 끝난 최종 fast/slow 조합은 다시 동일한 validation을 통과해야 한다.
+
 ```text
 Instrument + strategy_id + parameters
                 ↓
@@ -429,7 +462,7 @@ Order
 
 ### Position sizing
 
-Position sizing은 Signal과 목표 비중 설정을 실제 주문 후보 수량으로 바꾸는 계산이다. Strategy 안에서 계산하지 않으며, 현재는 Portfolio class 대신 필요한 값을 함수에 직접 전달한다.
+Position sizing은 Signal과 목표 비중 설정을 실제 주문 후보 수량으로 바꾸는 계산이다. Strategy 안에서 계산하지 않으며, 현재는 실제 계좌 Portfolio 객체 대신 필요한 값을 함수에 직접 전달한다. Backtest 내부에는 별도의 `BacktestPortfolio`가 있다.
 
 ```text
 포트폴리오 가치 10,000,000원
@@ -502,7 +535,7 @@ Order  (아직 미구현)
 
 예를 들어 `BUY 0.01 BTC`가 100만원이지만 최대 주문 금액이 50만원이면 `BUY 0.005 BTC`로 ADJUSTED된다. 여러 한도가 동시에 적용되면 허용 금액이 가장 작은 제한을 사용하므로 규칙 검사 순서에 따라 결과가 바뀌지 않는다.
 
-Risk 계산에는 portfolio value, available cash, 현재 종목 가치, 현재 가격, 수량 단위를 직접 전달한다. 아직 Portfolio class나 실제 잔고 조회는 없다. SELL은 long 포지션을 줄이는 방향이므로 BUY용 현금·노출 한도로 막지 않는다.
+Risk 계산에는 portfolio value, available cash, 현재 종목 가치, 현재 가격, 수량 단위를 직접 전달한다. 아직 실제 계좌 Portfolio나 잔고 조회는 없다. SELL은 long 포지션을 줄이는 방향이므로 BUY용 현금·노출 한도로 막지 않는다.
 
 ### 금융 값에 Decimal을 사용하는 이유
 
@@ -602,7 +635,7 @@ Simulated Fill
 ```
 
 - **Fill**은 승인된 주문 후보가 특정 가격에서 실제로 체결됐다고 가정한 결과다. 여기서는 다음 Bar의 open 가격에 전체 수량이 즉시 체결됐다고 가정한다.
-- **Portfolio**는 Backtest 안의 가상 현금과 단일 종목 보유 수량이다. 실제 Upbit 계좌나 잔고가 아니다.
+- **Portfolio**는 Backtest 안의 가상 현금, 단일 종목 보유 수량, 평균단가와 누적 실현손익을 관리한다. 실제 Upbit 계좌나 잔고가 아니다.
 - **Mark-to-market**은 마지막에 팔지 않은 보유 자산을 최신 closed Bar의 close 가격으로 평가하는 것이다.
 - **Look-ahead bias**는 그 시점에는 알 수 없던 미래 정보를 과거 판단에 사용하는 오류다.
 
@@ -626,14 +659,61 @@ Bullish target adjustment는 사고 싶은 방향으로 목표에 접근하는 �
 
 이 비용 값은 실제 시장 비용을 자동으로 조회하거나 추정한 결과가 아니다. 사용자가 Backtest 가정으로 직접 지정하는 값이다.
 
+### Portfolio 회계와 Fill / ClosedTrade
+
+`BacktestPortfolio`는 다음 상태를 추적한다.
+
+- `cash`: 남은 가상 현금
+- `position_quantity`: 현재 보유 수량
+- `average_cost`: BUY fee까지 포함한 현재 보유 수량의 평균 취득원가
+- `realized_pnl`: SELL로 이미 확정된 누적 손익
+
+미실현손익은 상태로 따로 저장하지 않고 현재 가격을 받을 때 계산한다.
+
+```text
+unrealized_pnl = position_quantity × (current_price - average_cost)
+```
+
+현재 단일 자산 Backtest에서 외부 입출금이 없다는 조건에서는 다음 회계 관계가 성립한다.
+
+```text
+initial_cash + realized_pnl + unrealized_pnl
+= current portfolio value
+```
+
+**Fill**은 한 번의 가상 체결이다. **ClosedTrade**는 position이 없는 상태에서 첫 BUY로 시작해 추가 BUY나 부분 SELL을 거친 뒤 최종 SELL로 다시 수량 0이 될 때까지의 전체 lifecycle이다.
+
+```text
+flat → BUY → BUY → BUY → SELL(all) → flat
+         Fill 3개       Fill 1개
+         └──── ClosedTrade 1개 ────┘
+```
+
+Risk의 최대 주문 금액 때문에 하나의 진입이 여러 Fill로 나뉘어도 완료된 position lifecycle은 하나의 ClosedTrade다. 마지막에 보유 수량이 남아 있으면 아직 종료되지 않은 open position이므로 ClosedTrade 지표에 포함하지 않는다. 현재 5년 dataset과 예제 설정에서는 Fill 68개, ClosedTrade 17개, 마지막 open position 1개가 확인됐지만 이는 특정 데이터와 설정의 참고값이다.
+
 ### Backtest 성과를 읽는 기본 지표
+
+Portfolio 전체 흐름을 보는 지표는 다음과 같다.
 
 - **Equity Curve**는 각 closed Bar의 close 시점에 가상 계좌 전체 가치가 어떻게 변했는지 기록한 흐름이다.
 - **Total Return**은 초기 자금 대비 마지막 계좌 가치의 전체 변화율이다. `0.16`은 전체 기간 약 16%를 뜻한다.
 - **CAGR**은 첫 Bar부터 마지막 Bar까지의 실제 기간을 연 단위로 환산한 연평균 복리 변화율이다.
 - **MDD(Maximum Drawdown)**는 이전 최고 계좌 가치에서 가장 크게 하락했던 비율이다. 이 프로젝트에서는 `-0.10`처럼 음수로 표시하며 이는 최대 약 10% 하락을 뜻한다.
+
+완료된 ClosedTrade만 보는 지표는 다음과 같다. 마지막 open position의 미실현손익은 섞지 않는다.
+
+- **Win Rate**: 전체 ClosedTrade 중 이익 Trade의 비율
+- **Gross Profit / Gross Loss**: 이익 합계와 손실 절댓값 합계
+- **Profit Factor**: Gross Profit을 Gross Loss로 나눈 값
+- **Average Trade PnL**: ClosedTrade 실현손익의 산술평균
+- **Average Trade Return**: 각 `realized_pnl / entry_cost` 비율의 단순 산술평균
+
+Benchmark는 Strategy 결과를 해석하기 위한 별도 비교 기준이다.
+
 - **Passive 10%**는 첫 Bar open에서 자금의 10%만 BTC로 사고 나머지 90%는 현금으로 둔 비교 기준이다. 이후 BTC 비중이 변해도 다시 10%로 맞추지 않으므로, 현재 Strategy와 초기 노출만 비슷할 뿐 지속적인 10% 비중 유지 benchmark는 아니다.
 - **BTC 100% Buy & Hold**는 첫 Bar open에서 가능한 만큼 BTC를 한 번 사고 마지막 close까지 그대로 보유하는 비교 기준이다. 현재 Strategy보다 BTC 가격 위험에 훨씬 많이 노출된다.
+
+두 benchmark는 dataset 첫 Bar open에서 즉시 진입한다. 반면 MA 20/60 Strategy는 61개 closed Bar의 warm-up 뒤부터 Signal을 평가할 수 있고 실제 crossover가 발생해야 진입한다. 따라서 평가 dataset 기간은 같아도 실제 시장 노출 시작 시점은 다를 수 있다. 이는 현재 benchmark 정의의 특성이며 benchmark가 잘못됐다는 뜻은 아니다.
 
 현재 약 5년 dataset과 `fee_rate=0.0005`, `slippage_bps=5` 가정에서 확인한 참고값은 다음과 같다.
 
@@ -645,7 +725,24 @@ Bullish target adjustment는 사고 싶은 방향으로 목표에 접근하는 �
 
 이 값들은 특정 dataset과 비용 가정으로 계산한 과거 시뮬레이션 참고값이다. 데이터 기간, 비용, 규칙이 바뀌면 결과도 달라지며 실제 과거 결과가 미래 수익을 보장하지 않는다. 특히 100% BTC benchmark는 위험 노출이 달라 MA Strategy 10%와 같은 위험 수준의 직접 비교가 아니다.
 
-현재 가상 Portfolio는 `cash`와 `position_quantity`만 가진다. BUY Fill은 현금을 줄이고 수량을 늘리며, SELL Fill은 반대로 처리한다. 보유량보다 많이 팔 수 없다. 종료 시에는 `cash + position_quantity × latest_close`로 최종 가치를 계산한다.
+BUY Fill은 fee를 포함한 현금을 줄이고 수량과 평균단가를 갱신한다. SELL Fill은 순수입을 현금에 더하고 실현손익을 누적한다. 보유량보다 많이 팔 수 없으며 전량 매도하면 평균단가는 0으로 돌아간다. 종료 시에는 `cash + position_quantity × latest_close`로 최종 가치를 계산한다.
+
+### Backtest metadata와 fingerprint
+
+`BacktestRunMetadata`는 결과값이 아니라 “어떤 조건으로 실행했는가”를 기록한다. Instrument/timeframe, dataset 범위·Bar 수·dataset version, Strategy와 parameter, sizing, Risk 한도, fee/slippage, code version이 포함된다.
+
+Fingerprint는 다음처럼 만든다.
+
+```text
+BacktestRunMetadata
+  → key가 정렬된 canonical JSON
+  → UTF-8
+  → SHA-256 lowercase hex fingerprint
+```
+
+Decimal은 의미 기준으로 정규화하므로 `0.10`과 `0.1`, `500000`과 `500000.0`은 각각 같은 fingerprint 입력이 된다.
+
+현재 `dataset_version`과 `code_version`은 호출자가 직접 제공하는 label이다. 따라서 이 fingerprint는 **기록된 metadata 실행조건의 fingerprint**이며, 실제 SQLite 파일 내용의 hash나 실제 Git commit의 증명은 아니다.
 
 ```powershell
 python -m investing_plz backtest `
@@ -666,7 +763,7 @@ python -m investing_plz backtest `
   --min-cash-reserve 1000000
 ```
 
-이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석된다. `fee_rate`와 `slippage_bps`의 기본값은 0이다. 평균단가와 실현손익 같은 상세 회계는 아직 없으며, 과거 지표만 보고 Strategy가 좋다고 단정하면 안 된다.
+이 명령은 DB의 closed Bar만 읽고 DB를 수정하지 않는다. 금융 옵션은 `Decimal`로 해석되며 `fee_rate`와 `slippage_bps`의 기본값은 0이다. CLI 요약은 현재 모든 회계·Trade 지표나 metadata를 출력하지 않지만 Python 결과 객체와 테스트에서는 계산·검증된다. 과거 지표만 보고 Strategy가 좋다고 단정하면 안 된다.
 
 가상 체결 내역도 확인하려면 같은 명령 끝에 `--show-fills`를 붙인다.
 
@@ -722,6 +819,16 @@ python -m pytest -q
 | `test_order_intent.py` | BUY/SELL Intent, Decimal·UTC 검증과 JSON round-trip |
 | `test_position_sizing.py` | 목표 비중 수량, BUY/SELL, 내림, 입력 검증, BTC/ETF 재사용 |
 | `test_risk_manager.py` | 승인·축소·거부, 주문금액·종목비중·현금 한도와 SELL 처리 |
+| `test_backtest.py` | next-bar 실행, target-state, Risk 재사용과 결정론적 Portfolio 변화 |
+| `test_backtest_cli.py` | SQLite closed Bar부터 Backtest 요약·Fill 출력까지의 CLI 흐름 |
+| `test_backtest_costs.py` | deterministic slippage, fee와 fee-aware cash accounting |
+| `test_backtest_metrics.py` | Equity Curve, Total Return, CAGR, MDD와 결과 불변성 |
+| `test_passive_benchmark.py` | Passive 10%와 BTC 100% Buy & Hold 계산 |
+| `test_portfolio_accounting.py` | 평균단가와 실현·미실현손익 및 회계 관계 |
+| `test_closed_trades.py` | Fill을 flat→position→flat ClosedTrade로 묶는 규칙 |
+| `test_trade_metrics.py` | Win Rate, Profit Factor와 평균 Trade 손익·수익률 |
+| `test_backtest_metadata.py` | 실행조건 metadata validation과 serialization round-trip |
+| `test_backtest_fingerprint.py` | Decimal canonical fingerprint와 반복 실행 재현성 |
 | `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
@@ -932,15 +1039,17 @@ tests/
 | M2-A | Strategy, Signal, 20/60 MA crossover | 완료 |
 | M2-B1 | Instrument별 Strategy Profile | 완료 |
 | M2-B2-A | OrderIntent와 Decimal 기초 | 완료 |
-| M2-B2-B | Position sizing과 BTC/ETF 재사용 | 부분 완료 |
+| M2-B2-B | Position sizing과 BTC/ETF 재사용 | 완료 |
 | M2-C1 | Basic Risk Manager | 완료 |
-| M2-C2 | 중복 미체결 주문과 운영 위험 | **아직 구현되지 않음** |
 | M3-A | 최소 결정론적 Backtest | 완료 |
 | M3-B1 | 수수료·slippage 실행 비용 | 완료 |
 | M3-B2 | Equity Curve·Total Return·MDD·CAGR·Passive benchmark | 완료 |
-| M3-C | 실행 metadata·범용 architecture 강화 | **아직 구현되지 않음** |
+| M3-B3 | Strategy parameter resolution | 완료 |
+| M3-B4 | 평균단가·손익·ClosedTrade·Trade Metrics | 완료 |
+| M3-C | Backtest metadata와 deterministic fingerprint | 완료 |
+| M4 | Paper Trading: Order/Broker/Clock/영속화·복구 | **아직 구현되지 않음** |
 
-현재 저장소에는 Signal, Position sizing, OrderIntent, 기본 Risk 판단과 단일 종목 가상 Portfolio를 사용하는 최소 Backtest가 있다. 실제 Order, 미체결 주문 상태, Broker와 실제 계좌 Portfolio는 아직 없다.
+현재 저장소에는 Signal, Position sizing, OrderIntent, 기본 Risk 판단, 실행비용·회계·성과분석·재현성 기록을 포함한 단일 종목 Backtest가 있다. 실제 Order/OrderStatus, Broker, PaperBroker, Clock, 주문 영속화·복구와 실제 계좌 Portfolio는 아직 없다.
 
 ## 17. 초보자가 지금 이해하면 충분한 것
 

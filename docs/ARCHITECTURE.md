@@ -1,76 +1,96 @@
 # Architecture
 
-## 목표와 접근법
+이 문서는 현재 존재하는 구현과 앞으로 만들 목표 구조를 구분한다. 현재 코드의 정확한 진행 상태는 `TODO.md`가 기준이다.
 
-초기 시스템은 **단일 Python 애플리케이션 안의 모듈형 모놀리스**로 만든다. 도메인 모델과 포트를 중심에 두고 Upbit, 파일/DB, 시계 같은 외부 요소를 어댑터로 연결한다. 프로세스 분리나 이벤트 브로커는 실제 운영상 필요가 생길 때만 도입한다.
+## A. Current implementation
 
-핵심 흐름은 다음과 같다.
-
-```text
-MarketData adapter -> normalized MarketEvent -> Strategy -> Signal/OrderIntent
-                                                        -> RiskManager
-                                                        -> ExecutionService
-                                                        -> Broker port -> Broker adapter
-Broker events ------------------------------------------> Portfolio
-모든 주요 입력/결정/결과 -------------------------------> Storage
-
-Backtest / Paper / Live = 같은 코어 + 서로 다른 data, clock, broker/execution adapter
-```
-
-## 모듈과 책임
-
-| 모듈 | 책임 | 주요 입력/출력 |
-|---|---|---|
-| `domain` | 공급자 중립 타입과 규칙: Instrument, Bar, Quote, Money, Signal, OrderIntent, Order, Fill, Position, PortfolioSnapshot | 불변에 가까운 도메인 객체 |
-| `market_data` | 원천 데이터를 조회/수집하고 중복·시간대·결측을 검증한 뒤 표준 Bar/Quote로 변환 | provider payload -> MarketEvent |
-| `strategy` | 시장 데이터와 읽기 전용 포트폴리오 상태로 매매 의도 생성. 주문 제출은 하지 않음 | context -> Signal/OrderIntent |
-| `risk` | 포지션 크기, 현금, 노출, 손실 한도, 중복 주문, 거래 가능 여부를 검사·축소·거부 | OrderIntent -> ApprovedOrder/Reject |
-| `execution` | 승인 주문을 실행 계획으로 바꾸고 제출, 상태 동기화, 취소, 재시도와 idempotency를 담당 | ApprovedOrder -> Order/Fill events |
-| `broker` | 잔고·주문·체결을 위한 포트와 Upbit/paper/향후 주식 브로커 어댑터 | 표준 요청/응답 <-> 외부 API |
-| `portfolio` | 현금, 포지션, 평균단가, 실현·미실현 손익과 거래 원장을 체결 기반으로 계산 | Fill/CorporateAction -> snapshot |
-| `market_rules` | 세션/캘린더, 통화, tick/lot, 최소 주문, 수수료·세금, 결제, corporate action 정책 | 시장별 convention |
-| `storage` | Bar, 주문, 체결, 포트폴리오 스냅샷, 전략 실행 및 의사결정 감사 기록의 repository 포트/구현 | 도메인 객체의 영속화 |
-| `backtest` | 과거 이벤트 재생, 결정론적 clock, fill/slippage/fee 모델, 성과 지표 | 동일 Strategy/Risk + simulated broker |
-| `application` | 유스케이스와 실행 루프를 조정하고 모드별 의존성을 조립 | collect/backtest/paper/live commands |
-| `config` | 환경, instrument profile, 전략 파라미터, 위험 한도 검증. 비밀은 환경/secret provider에서 주입 | config -> typed settings |
-| `observability` | 구조화 로그, 지표, 알림, run/order correlation ID | 운영 상태와 감사 추적 |
-| `analysis_ai` (향후) | 뉴스/시장 국면/매매 결과를 분석해 버전된 feature 또는 리포트를 생성 | 선택적 feature/report |
-
-## 의존성 규칙
+현재 시스템은 하나의 Python 프로세스 안에서 동작하는 모듈형 모놀리스다. 구현된 핵심 흐름은 다음과 같다.
 
 ```text
-domain <- strategy, risk, portfolio
-domain ports <- market_data, broker, storage, clock
-위 항목 <- application <- mode-specific composition root
-ports <- infrastructure adapters (Upbit, DB, paper, future stock broker)
-backtest -> domain ports + strategy + risk + portfolio
+Upbit public API
+  → UpbitMarketDataProvider
+  → normalized Bar
+  → validation
+  → SQLiteBarStore
+
+Historical closed Bars
+  → MovingAverageCrossoverStrategy
+  → Signal
+  → desired target state
+  → next Bar open
+  → position sizing
+  → OrderIntent
+  → BasicRiskManager
+  → deterministic simulated Fill
+  → BacktestPortfolio
+  → equity, accounting, ClosedTrade, performance analysis
 ```
 
-- `domain`, `strategy`, `risk`, `portfolio`는 외부 SDK와 infrastructure를 import하지 않는다.
-- `application`은 포트만 사용하며 실제 어댑터 선택은 composition root에서 한다.
-- 어댑터가 공급자 응답과 오류를 표준 도메인 타입/오류로 번역한다.
-- Portfolio의 진실은 Signal이 아니라 체결 이벤트다. 재시작 시 저장된 주문·체결과 브로커 상태를 reconciliation한다.
-- Strategy 결과는 `(strategy_id, version, parameter_set_id, instrument_id)`와 함께 기록해 재현 가능하게 한다.
+### 현재 모델과 모듈
 
-## Strategy와 파라미터
+| 모듈 | 현재 책임 |
+|---|---|
+| `domain` | `Instrument(venue, symbol)`, `Bar`, `OrderIntent`, UTC·Decimal 규칙 |
+| `market_data` | provider 계약, candle 완료 판정, Bar 정렬·중복·gap 검증, dataset summary |
+| `adapters` | Upbit 공개 candle HTTP 요청과 응답→Bar 변환 |
+| `storage` | SQLite Bar 저장·조회·중복 방지·closed Bar 조회 |
+| `indicators` | Decimal 종가 기반 SMA 계산 |
+| `strategy` | closed Bar sequence를 받아 bullish/bearish/neutral `Signal` 생성, Strategy Profile과 parameter resolution |
+| `application` | 수집 조정과 목표 비중→OrderIntent position sizing |
+| `risk` | 주문금액·종목비중·현금 한도로 OrderIntent 승인·축소·거부 |
+| `backtest` | historical replay, next-bar execution, fee/slippage, 단일 종목 Portfolio 회계, 지표·benchmark·metadata·fingerprint |
 
-Strategy 계약은 대략 `on_event(context) -> list[OrderIntent]`이며 `context`에는 정규화된 데이터, clock, 읽기 전용 portfolio view, 해당 instrument의 파라미터만 포함한다. 파라미터 우선순위는 `기본 전략값 < 자산군 profile < instrument override < 실행별 override`로 정하고, 병합 결과를 실행 시작 시 검증·고정·기록한다. 따라서 같은 전략 구현에 BTC, ETF, 개별주식별 기간, 임계값, 목표 비중과 위험 한도를 다르게 적용할 수 있다.
+현재 Strategy parameter 우선순위는 다음과 같다.
 
-## 실행 모드의 일관성
+```text
+default < instrument/profile < runtime override
+```
 
-| 모드 | Market Data/Clock | Broker/Fill | 공유 부분 |
-|---|---|---|---|
-| Backtest | 저장된 데이터 + simulated clock | simulated broker, fee/slippage model | Strategy, Risk, Portfolio, domain |
-| Paper | 실시간/지연 데이터 + real clock | paper broker | Strategy, Risk, Portfolio, domain |
-| Live | 실시간 데이터 + real clock | 실제 broker adapter | Strategy, Risk, Portfolio, domain |
+병합된 최종 fast/slow parameter는 기존 validation을 통과해야 한다. Strategy 내부에는 symbol별 분기가 없다.
 
-결정론을 위해 코어에서 현재 시간, 난수, 네트워크를 직접 사용하지 않고 각각 주입한다. 백테스트는 미래 데이터 참조를 막고, Live와 동일한 가격·수량 정규화 및 위험 검사 경로를 사용한다.
+### 현재 Backtest의 경계
 
-## Crypto와 Stock 확장
+- Strategy는 `closed Bars → Signal`만 담당한다.
+- bullish/bearish Signal은 runner의 desired target state를 바꾼다.
+- Position sizing과 `BasicRiskManager`는 기존 공통 구현을 재사용한다.
+- Signal은 같은 Bar가 아니라 다음 Bar open에서 실행되어 look-ahead를 막는다.
+- runner가 deterministic historical replay 과정에서 simulated `Fill`을 직접 생성한다.
+- 현재 Backtest에는 Broker 또는 Clock abstraction이 없다.
+- `BacktestPortfolio`는 cash, position quantity, average cost, realized PnL을 유지하며 현재 가격으로 unrealized PnL을 계산한다.
+- `ClosedTrade`는 flat→position→flat의 완료된 lifecycle이며 마지막 open position은 포함하지 않는다.
+- 실행 조건은 `BacktestRunMetadata`에 기록되고 canonical metadata JSON의 SHA-256으로 configuration fingerprint를 만든다.
 
-Upbit 초기 구현은 `UpbitMarketDataAdapter`, `UpbitBrokerAdapter`, crypto 24/7 calendar, KRW 수수료/tick/최소주문 규칙으로 제한한다. Bithumb은 같은 포트를 구현하는 별도 어댑터와 규칙 profile을 추가한다.
+Fingerprint의 `dataset_version`과 `code_version`은 호출자가 제공하는 label이다. 따라서 현재 fingerprint는 기록된 metadata 조건을 식별하지만 SQLite 내용 hash나 Git commit 증명은 아니다.
 
-미국 주식 지원 시 Strategy, Risk 엔진, Execution 오케스트레이션, Portfolio 원장, Storage 포트, Backtest 러너는 재사용한다. 별도로 구현할 부분은 주식 market-data/broker adapter, 거래소 캘린더와 시간대, 주문 유형/세션 규칙, 수수료·세금·결제, 배당·분할 등 corporate action 처리다. `Instrument`는 처음부터 asset class, venue, symbol, quote currency, timezone과 안정적인 내부 ID를 가진다. 공급자 심볼은 adapter mapping으로 관리한다.
+## B. Target architecture / future direction
 
-AI는 표준화되고 시점이 명확한 feature를 생성하거나 사후 리포트를 만든다. Strategy가 AI feature를 사용할 수는 있지만 결측/지연 시 안전하게 동작해야 하며, Risk와 주문 제출 권한은 AI 계층 밖에 둔다.
+M4 이후에도 모듈형 모놀리스와 현재 코어 재사용 원칙을 유지한다. 실제 필요가 생길 때 다음 경계를 추가한다.
 
+| 향후 모듈/경계 | 목표 책임 |
+|---|---|
+| Order / OrderStatus | 제출 이후 주문 lifecycle의 표준 상태 |
+| Broker port | 잔고·주문·체결을 위한 provider-neutral 계약 |
+| PaperBroker | 외부 실주문 없이 Broker 계약을 검증하는 Paper 구현 |
+| Clock | Paper/Live polling과 시간 결정을 명시적으로 주입 |
+| Storage repository | Bar 이외 주문·체결·상태의 영속화와 재시작 복구 |
+| Execution | 제출, idempotency, 상태 동기화, 재시도 정책 조정 |
+| Reconciliation | 저장 상태와 Broker 상태의 불일치 탐지·복구 |
+| Observability | 구조화 로그, correlation ID, 운영 알림과 kill switch |
+
+이 항목들은 현재 구현된 컴포넌트가 아니라 M4 Paper Trading부터 추가할 목표다. 세부 계약은 실제 Paper 요구사항이 생길 때 정의한다.
+
+## 의존성 원칙
+
+- 도메인과 Strategy는 Upbit SDK, SQLite, 자격 증명, 네트워크를 직접 호출하지 않는다.
+- 공급자 응답과 오류는 adapter가 표준 모델과 오류로 변환한다.
+- Strategy, position sizing, Risk는 Backtest/Paper/Live에서 가능한 한 재사용한다.
+- Portfolio의 상태 변화는 Signal이 아니라 Fill을 기준으로 계산한다.
+- 외부 주문은 항상 Risk Manager를 통과해야 한다.
+- 범용 framework나 분산 구조는 실제 필요가 생기기 전에 도입하지 않는다.
+- AI는 향후 선택적 분석 입력이나 리포트로만 추가하며 Risk와 주문 권한을 우회하지 않는다.
+
+## Crypto와 Stock 확장 방향
+
+Upbit 외 거래소와 주식 지원에서도 현재 `Instrument`, `Bar`, Strategy, sizing, Risk 및 분석 로직을 가능한 범위에서 재사용한다. 별도로 필요한 것은 provider/broker adapter와 시장별 calendar, 거래 단위, 수수료·세금·결제, 배당·분할 규칙이다.
+
+현재 `Instrument` 필드는 `venue`와 `symbol`뿐이다. asset class, quote currency, timezone, 내부 ID 같은 추가 정보는 실제 주식·다중시장 요구가 생겼을 때 호환성을 검토하며 확장한다.
