@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from investing_plz.broker.memory import InMemoryBroker
 from investing_plz.broker.models import ExecutionFill
+from investing_plz.broker.paper_account import project_paper_account
 from investing_plz.domain import Instrument, Order, OrderSide, OrderStatus
 from investing_plz.domain.decimal import require_decimal
 from investing_plz.execution import (
@@ -33,6 +34,7 @@ class PaperBroker(InMemoryBroker):
         initial_cash = require_decimal(initial_cash, name="initial_cash")
         if initial_cash < 0:
             raise ValueError("initial_cash must not be negative")
+        self._initial_cash = initial_cash
         self._cash = initial_cash
         self._fee_rate = validate_fee_rate(fee_rate)
         self._slippage_bps = validate_slippage_bps(slippage_bps)
@@ -62,74 +64,18 @@ class PaperBroker(InMemoryBroker):
         )
         persisted_orders = tuple(orders)
         persisted_fills = tuple(fills)
-        order_by_id: dict[str, Order] = {}
-        for order in persisted_orders:
-            if not isinstance(order, Order):
-                raise TypeError("orders must contain only Order values")
-            if order.order_id in order_by_id:
-                raise ValueError(f"duplicate persisted order_id: {order.order_id}")
-            order_by_id[order.order_id] = order
-
-        fill_by_id: dict[str, ExecutionFill] = {}
-        filled_order_ids: set[str] = set()
-        cash = broker._cash
-        positions: dict[Instrument, Decimal] = {}
-        for fill in persisted_fills:
-            if not isinstance(fill, ExecutionFill):
-                raise TypeError("fills must contain only ExecutionFill values")
-            if fill.fill_id in fill_by_id:
-                raise ValueError(f"duplicate persisted fill_id: {fill.fill_id}")
-            order = order_by_id.get(fill.order_id)
-            if order is None:
-                raise ValueError(
-                    f"persisted fill references missing order: {fill.order_id}"
-                )
-            _validate_persisted_fill(fill, order)
-            if order.order_id in filled_order_ids:
-                raise ValueError(
-                    f"multiple fills found for non-partial order: {order.order_id}"
-                )
-            filled_order_ids.add(order.order_id)
-            fill_by_id[fill.fill_id] = fill
-            notional = fill.quantity * fill.fill_price
-            quantity = positions.get(fill.instrument, Decimal("0"))
-            if fill.side is OrderSide.BUY:
-                cash -= notional + fill.fee_amount
-                positions[fill.instrument] = quantity + fill.quantity
-            else:
-                cash += notional - fill.fee_amount
-                positions[fill.instrument] = quantity - fill.quantity
-
-        missing_fills = {
-            order.order_id
-            for order in persisted_orders
-            if order.status is OrderStatus.FILLED
-            and order.order_id not in filled_order_ids
-        }
-        if missing_fills:
-            raise ValueError(
-                "FILLED orders must have exactly one persisted fill: "
-                + ", ".join(sorted(missing_fills))
-            )
-        if cash < 0:
-            raise ValueError("persisted fills produce negative cash")
-        negative_positions = [
-            instrument
-            for instrument, quantity in positions.items()
-            if quantity < 0
-        ]
-        if negative_positions:
-            names = ", ".join(
-                f"{instrument.venue}:{instrument.symbol}"
-                for instrument in negative_positions
-            )
-            raise ValueError(f"persisted fills produce negative position: {names}")
-
-        broker._orders = order_by_id
-        broker._fills = fill_by_id
-        broker._cash = cash
-        broker._positions = positions
+        projection = project_paper_account(
+            initial_cash, persisted_orders, persisted_fills
+        )
+        broker._orders = {order.order_id: order for order in persisted_orders}
+        broker._fills = {fill.fill_id: fill for fill in persisted_fills}
+        broker._cash = projection.cash
+        broker._positions = dict(projection.positions)
         return broker
+
+    @property
+    def initial_cash(self) -> Decimal:
+        return self._initial_cash
 
     @property
     def cash(self) -> Decimal:
@@ -139,6 +85,18 @@ class PaperBroker(InMemoryBroker):
         if not isinstance(instrument, Instrument):
             raise TypeError("instrument must be an Instrument")
         return self._positions.get(instrument, Decimal("0"))
+
+    def list_positions(self) -> tuple[tuple[Instrument, Decimal], ...]:
+        return tuple(
+            sorted(
+                (
+                    (instrument, quantity)
+                    for instrument, quantity in self._positions.items()
+                    if quantity != 0
+                ),
+                key=lambda item: (item[0].venue, item[0].symbol),
+            )
+        )
 
     def execute_order(
         self,
@@ -204,15 +162,3 @@ class PaperBroker(InMemoryBroker):
         rejected = order.transition_to(OrderStatus.REJECTED)
         self._replace_order(rejected)
         return rejected
-
-
-def _validate_persisted_fill(fill: ExecutionFill, order: Order) -> None:
-    if order.status is not OrderStatus.FILLED:
-        raise ValueError("persisted fill requires a FILLED order")
-    if (
-        fill.instrument != order.instrument
-        or fill.side is not order.side
-        or fill.quantity != order.quantity
-        or fill.strategy_id != order.strategy_id
-    ):
-        raise ValueError("persisted fill does not match its order")

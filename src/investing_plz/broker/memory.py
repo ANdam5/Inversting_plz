@@ -36,6 +36,9 @@ class InMemoryBroker:
     def list_open_orders(self) -> tuple[Order, ...]:
         return tuple(order for order in self._orders.values() if order.is_open)
 
+    def list_orders(self) -> tuple[Order, ...]:
+        return tuple(self._orders.values())
+
     def cancel_order(self, order_id: str) -> Order:
         order = self.get_order(order_id)
         if order is None:

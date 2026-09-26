@@ -6,7 +6,11 @@ from pathlib import Path
 from investing_plz.broker.models import ExecutionFill
 from investing_plz.domain import Instrument, Order, OrderSide, OrderStatus
 from investing_plz.domain.time import require_utc
-from investing_plz.storage.paper import PaperCursorScope, PaperDecisionKey
+from investing_plz.storage.paper import (
+    PaperCursorScope,
+    PaperDecisionKey,
+    PaperOrderDecision,
+)
 
 
 class SQLitePaperRepository:
@@ -170,6 +174,19 @@ class SQLitePaperRepository:
                 (*_scope_values(scope), OrderStatus.PENDING.value),
             ).fetchone()
         return None if row is None else _row_to_order(row)
+
+    def list_order_decisions(self) -> tuple[PaperOrderDecision, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT venue, symbol, strategy_id, timeframe,
+                       closed_bar_timestamp, order_id
+                FROM paper_order_decisions
+                ORDER BY venue, symbol, strategy_id, timeframe,
+                         closed_bar_timestamp, order_id
+                """
+            ).fetchall()
+        return tuple(_row_to_order_decision(row) for row in rows)
 
     def save_fill(self, fill: ExecutionFill) -> bool:
         if not isinstance(fill, ExecutionFill):
@@ -460,3 +477,17 @@ def _validate_fill_matches_order(fill: ExecutionFill, order: Order) -> None:
         or fill.strategy_id != order.strategy_id
     ):
         raise ValueError("fill must match its executed order")
+
+
+def _row_to_order_decision(row: tuple[str, ...]) -> PaperOrderDecision:
+    return PaperOrderDecision(
+        decision_key=PaperDecisionKey(
+            scope=PaperCursorScope(
+                instrument=Instrument(row[0], row[1]),
+                strategy_id=row[2],
+                timeframe=row[3],
+            ),
+            closed_bar_timestamp=datetime.fromisoformat(row[4]),
+        ),
+        order_id=row[5],
+    )

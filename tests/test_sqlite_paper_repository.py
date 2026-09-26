@@ -296,6 +296,10 @@ def test_register_submission_round_trip_and_same_registration_policy(
     assert repository.register_order_submission(key, order) is False
     assert repository.get_order_for_decision(key) == order
     assert repository.find_open_order_for_scope(key.scope) == order
+    decisions = repository.list_order_decisions()
+    assert len(decisions) == 1
+    assert decisions[0].decision_key == key
+    assert decisions[0].order_id == order.order_id
 
 
 def test_decision_cannot_be_linked_to_a_different_order(repository) -> None:

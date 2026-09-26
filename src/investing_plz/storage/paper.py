@@ -37,6 +37,18 @@ class PaperDecisionKey:
         require_utc(self.closed_bar_timestamp)
 
 
+@dataclass(frozen=True, slots=True)
+class PaperOrderDecision:
+    decision_key: PaperDecisionKey
+    order_id: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decision_key, PaperDecisionKey):
+            raise TypeError("decision_key must be a PaperDecisionKey")
+        if not isinstance(self.order_id, str) or not self.order_id.strip():
+            raise ValueError("order_id must not be empty")
+
+
 class PaperRepository(Protocol):
     """Persistence contract for paper orders, fills, and scheduler cursors."""
 
@@ -61,6 +73,8 @@ class PaperRepository(Protocol):
     def find_open_order_for_scope(
         self, scope: PaperCursorScope
     ) -> Order | None: ...
+
+    def list_order_decisions(self) -> tuple[PaperOrderDecision, ...]: ...
 
     def save_fill(self, fill: ExecutionFill) -> bool: ...
 
