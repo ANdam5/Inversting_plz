@@ -1,3 +1,4 @@
+import sqlite3
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -124,15 +125,17 @@ def test_same_scope_configuration_change_is_rejected(tmp_path, changes) -> None:
         {"timeframe": "minute60"},
     ],
 )
-def test_different_scopes_are_independent(tmp_path, changes) -> None:
+def test_different_scope_config_is_rejected_by_singleton_db(tmp_path, changes) -> None:
     repo = repository(tmp_path / "paper.db")
     first = config()
     other = replace(first, **changes)
 
     assert repo.register_session_config(first)
-    assert repo.register_session_config(other)
+    with pytest.raises(PaperSessionConfigurationError, match="different session"):
+        repo.register_session_config(other)
     assert repo.get_session_config(first.scope) == first
-    assert repo.get_session_config(other.scope) == other
+    assert repo.get_session_config(other.scope) is None
+    assert repo.list_session_configs() == (first,)
 
 
 def test_repository_reopen_preserves_session_config(tmp_path) -> None:
@@ -144,6 +147,36 @@ def test_repository_reopen_preserves_session_config(tmp_path) -> None:
     second = repository(database)
 
     assert second.get_session_config(expected.scope) == expected
+
+
+def test_legacy_database_with_multiple_configs_fails_closed(tmp_path) -> None:
+    database = tmp_path / "paper.db"
+    repo = repository(database)
+    requested = config()
+    repo.register_session_config(requested)
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO paper_session_configs (
+                venue, symbol, strategy_id, timeframe,
+                fast_window, slow_window, target_weight,
+                quantity_step, min_trade_amount, initial_cash,
+                max_order_amount, max_instrument_weight,
+                min_cash_reserve, fee_rate, slippage_bps
+            )
+            SELECT venue, 'KRW-ETH', strategy_id, timeframe,
+                   fast_window, slow_window, target_weight,
+                   quantity_step, min_trade_amount, '20000000',
+                   max_order_amount, max_instrument_weight,
+                   min_cash_reserve, fee_rate, slippage_bps
+            FROM paper_session_configs
+            """
+        )
+
+    with pytest.raises(PaperSessionConfigurationError, match="multiple"):
+        recover(repo, requested)
+
+    assert len(repo.list_session_configs()) == 2
 
 
 def test_recovery_rejects_mismatch_without_mutating_durable_state(tmp_path) -> None:
@@ -167,10 +200,10 @@ def test_existing_state_without_config_fails_closed(tmp_path) -> None:
     requested = config()
     order = Order(
         order_id="legacy-order",
-        instrument=requested.instrument,
+        instrument=ETH,
         side=OrderSide.BUY,
         quantity=Decimal("1"),
-        strategy_id=requested.strategy_id,
+        strategy_id="other-strategy",
         submitted_at=NOW,
     )
     repo.save_order(order)

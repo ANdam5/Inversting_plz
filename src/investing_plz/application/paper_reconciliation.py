@@ -38,15 +38,37 @@ def reconcile_paper_runtime(
         raise TypeError("broker must be a PaperBroker")
     issues: list[str] = []
     try:
+        session_configs = repository.list_session_configs()
         repository_orders = repository.list_orders()
         repository_fills = repository.list_fills()
         decisions = repository.list_order_decisions()
+        cursor_scopes = repository.list_cursor_scopes()
     except (TypeError, ValueError) as error:
         result = PaperReconciliationResult(
             (f"repository state is invalid: {error}",)
         )
         _log_reconciliation(result)
         return result
+
+    session_scope = None
+    if len(session_configs) != 1:
+        issues.append(
+            "Paper DB must contain exactly one session configuration"
+        )
+    else:
+        session_scope = session_configs[0].scope
+        for order in repository_orders:
+            if (
+                order.instrument != session_scope.instrument
+                or order.strategy_id != session_scope.strategy_id
+            ):
+                issues.append(f"order outside session scope: {order.order_id}")
+        for decision in decisions:
+            if decision.decision_key.scope != session_scope:
+                issues.append("decision outside session scope")
+        for durable_cursor_scope in cursor_scopes:
+            if durable_cursor_scope != session_scope:
+                issues.append("cursor outside session scope")
 
     broker_orders = broker.list_orders()
     broker_fills = broker.list_fills()
@@ -128,6 +150,8 @@ def reconcile_paper_runtime(
                 require_utc(timestamp)
         except (TypeError, ValueError) as error:
             issues.append(f"cursor state is invalid: {error}")
+        if session_scope is not None and cursor_scope != session_scope:
+            issues.append("requested cursor scope does not match session configuration")
 
     result = PaperReconciliationResult(tuple(issues))
     _log_reconciliation(result)

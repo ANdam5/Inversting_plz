@@ -186,7 +186,18 @@ def test_disabled_and_stale_runs_do_not_read_price_or_advance_cursor(tmp_path) -
         assert market.price_calls == 0
 
 
-def test_configuration_mismatch_fails_before_market_data_or_mutation(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"instrument": Instrument("upbit", "KRW-ETH")},
+        {"strategy_id": "other-strategy"},
+        {"timeframe": "minute60"},
+        {"fee_rate": Decimal("0.001")},
+    ],
+)
+def test_configuration_mismatch_fails_before_market_data_or_mutation(
+    tmp_path, changes
+) -> None:
     database = tmp_path / "paper.db"
     repository = SQLitePaperRepository(database)
     run_once(repository, FakeMarketData(bars("3", "2", "1", "4")))
@@ -201,7 +212,7 @@ def test_configuration_mismatch_fails_before_market_data_or_mutation(tmp_path) -
         run_once(
             SQLitePaperRepository(database),
             market,
-            requested=config(fee_rate=Decimal("0.001")),
+            requested=config(**changes),
         )
 
     reopened = SQLitePaperRepository(database)

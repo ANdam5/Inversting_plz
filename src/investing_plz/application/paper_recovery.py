@@ -8,6 +8,7 @@ from investing_plz.storage.paper import (
     PaperCursorScope,
     PaperRepository,
     PaperSessionConfig,
+    PaperSessionConfigurationError,
 )
 from investing_plz.structured_logging import log_event
 
@@ -21,10 +22,6 @@ class PaperRecoveryResult:
     last_processed_bar_timestamp: datetime | None
 
 
-class PaperSessionConfigurationError(ValueError):
-    pass
-
-
 def recover_paper_runtime(
     repository: PaperRepository,
     session_config: PaperSessionConfig,
@@ -36,18 +33,26 @@ def recover_paper_runtime(
 
     if not isinstance(session_config, PaperSessionConfig):
         raise TypeError("session_config must be a PaperSessionConfig")
-    durable_config = repository.get_session_config(session_config.scope)
-    if durable_config is None:
-        if _has_durable_state_for_scope(repository, session_config.scope):
+    durable_configs = repository.list_session_configs()
+    if len(durable_configs) > 1:
+        raise PaperSessionConfigurationError(
+            "Paper DB contains multiple session configurations"
+        )
+    if not durable_configs:
+        if _has_any_durable_trading_state(repository):
             raise PaperSessionConfigurationError(
                 "durable paper state exists without a session configuration"
             )
         repository.register_session_config(session_config)
         durable_config = session_config
-    elif durable_config != session_config:
+    else:
+        durable_config = durable_configs[0]
+    if durable_config != session_config:
         raise PaperSessionConfigurationError(
             "requested paper session configuration does not match durable configuration"
         )
+
+    _validate_durable_session_scope(repository, durable_config.scope)
 
     broker = PaperBroker.from_persisted_state(
         initial_cash=durable_config.initial_cash,
@@ -81,22 +86,30 @@ def recover_paper_runtime(
     return result
 
 
-def _has_durable_state_for_scope(
-    repository: PaperRepository, scope: PaperCursorScope
-) -> bool:
-    if repository.get_last_processed_bar_timestamp(scope) is not None:
-        return True
-    if any(
-        decision.decision_key.scope == scope
-        for decision in repository.list_order_decisions()
-    ):
-        return True
-    if any(
-        order.instrument == scope.instrument and order.strategy_id == scope.strategy_id
-        for order in repository.list_orders()
-    ):
-        return True
-    return any(
-        fill.instrument == scope.instrument and fill.strategy_id == scope.strategy_id
-        for fill in repository.list_fills()
+def _has_any_durable_trading_state(repository: PaperRepository) -> bool:
+    return bool(
+        repository.list_orders()
+        or repository.list_fills()
+        or repository.list_order_decisions()
+        or repository.list_cursor_scopes()
     )
+
+
+def _validate_durable_session_scope(
+    repository: PaperRepository, scope: PaperCursorScope
+) -> None:
+    for order in repository.list_orders():
+        if order.instrument != scope.instrument or order.strategy_id != scope.strategy_id:
+            raise PaperSessionConfigurationError(
+                f"durable order is outside the Paper session scope: {order.order_id}"
+            )
+    for decision in repository.list_order_decisions():
+        if decision.decision_key.scope != scope:
+            raise PaperSessionConfigurationError(
+                "durable decision is outside the Paper session scope"
+            )
+    for cursor_scope in repository.list_cursor_scopes():
+        if cursor_scope != scope:
+            raise PaperSessionConfigurationError(
+                "durable cursor is outside the Paper session scope"
+            )

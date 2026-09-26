@@ -12,6 +12,10 @@ from investing_plz.risk import RiskLimits
 from investing_plz.strategy import MovingAverageCrossoverParameters
 
 
+class PaperSessionConfigurationError(ValueError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class PaperCursorScope:
     """Stable identity for one paper decision cursor."""
@@ -56,6 +60,7 @@ class PaperOrderDecision:
 
 @dataclass(frozen=True, slots=True)
 class PaperSessionConfig:
+    """Durable identity for one Paper DB; strategy_id identifies semantics."""
     instrument: Instrument
     strategy_id: str
     timeframe: str
@@ -119,6 +124,8 @@ class PaperRepository(Protocol):
         self, scope: PaperCursorScope
     ) -> PaperSessionConfig | None: ...
 
+    def list_session_configs(self) -> tuple[PaperSessionConfig, ...]: ...
+
     def save_order(self, order: Order) -> None: ...
 
     def get_order(self, order_id: str) -> Order | None: ...
@@ -158,3 +165,5 @@ class PaperRepository(Protocol):
     def save_last_processed_bar_timestamp(
         self, scope: PaperCursorScope, timestamp: datetime
     ) -> None: ...
+
+    def list_cursor_scopes(self) -> tuple[PaperCursorScope, ...]: ...

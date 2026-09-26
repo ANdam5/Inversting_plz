@@ -11,11 +11,12 @@ from investing_plz.storage.paper import (
     PaperDecisionKey,
     PaperOrderDecision,
     PaperSessionConfig,
+    PaperSessionConfigurationError,
 )
 
 
 class SQLitePaperRepository:
-    """SQLite persistence for paper orders, fills, and processing cursors."""
+    """Persistence for one isolated M4 Paper account/session per DB file."""
 
     def __init__(self, database: str | Path) -> None:
         self.database = Path(database)
@@ -98,14 +99,19 @@ class SQLitePaperRepository:
         if not isinstance(config, PaperSessionConfig):
             raise TypeError("config must be a PaperSessionConfig")
         with self._connect() as connection:
-            row = connection.execute(
-                _SELECT_SESSION_CONFIG + _SESSION_CONFIG_WHERE,
-                _scope_values(config.scope),
-            ).fetchone()
-            if row is not None:
-                if _row_to_session_config(row) != config:
-                    raise ValueError(
-                        "paper session configuration mismatch for scope"
+            rows = connection.execute(
+                _SELECT_SESSION_CONFIG
+                + " ORDER BY venue, symbol, strategy_id, timeframe"
+            ).fetchall()
+            if len(rows) > 1:
+                raise PaperSessionConfigurationError(
+                    "Paper DB contains multiple session configurations"
+                )
+            if rows:
+                if _row_to_session_config(rows[0]) != config:
+                    raise PaperSessionConfigurationError(
+                        "paper session configuration mismatch: "
+                        "Paper DB is already assigned to a different session"
                     )
                 return False
             connection.execute(
@@ -132,6 +138,14 @@ class SQLitePaperRepository:
                 _scope_values(scope),
             ).fetchone()
         return None if row is None else _row_to_session_config(row)
+
+    def list_session_configs(self) -> tuple[PaperSessionConfig, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                _SELECT_SESSION_CONFIG
+                + " ORDER BY venue, symbol, strategy_id, timeframe"
+            ).fetchall()
+        return tuple(_row_to_session_config(row) for row in rows)
 
     def save_order(self, order: Order) -> None:
         if not isinstance(order, Order):
@@ -344,6 +358,20 @@ class SQLitePaperRepository:
                 """,
                 (*_scope_values(scope), timestamp.isoformat()),
             )
+
+    def list_cursor_scopes(self) -> tuple[PaperCursorScope, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT venue, symbol, strategy_id, timeframe
+                FROM paper_cursors
+                ORDER BY venue, symbol, strategy_id, timeframe
+                """
+            ).fetchall()
+        return tuple(
+            PaperCursorScope(Instrument(row[0], row[1]), row[2], row[3])
+            for row in rows
+        )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database)

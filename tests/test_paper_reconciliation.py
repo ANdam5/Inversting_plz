@@ -184,7 +184,8 @@ def assert_issue(result, text: str) -> None:
 
 def test_empty_account_is_safe(tmp_path) -> None:
     repository = make_repository(tmp_path / "paper.db")
-    result = reconcile_paper_runtime(make_broker(), repository, cursor_scope=SCOPE)
+    broker = recover(repository)
+    result = reconcile_paper_runtime(broker, repository, cursor_scope=SCOPE)
 
     assert result.is_safe_to_trade
     assert result.issues == ()
@@ -195,10 +196,10 @@ def test_normal_recovered_filled_order_and_multiple_executions_are_safe(tmp_path
     persist_filled(repository)
     persist_filled(
         repository,
-        order_id="eth-order",
-        instrument=ETH,
+        order_id="second-btc-order",
+        instrument=BTC,
         quantity=Decimal("1"),
-        fill_id="eth-fill",
+        fill_id="second-btc-fill",
         fill_price=Decimal("50"),
         timestamp=T1,
     )
@@ -209,8 +210,36 @@ def test_normal_recovered_filled_order_and_multiple_executions_are_safe(tmp_path
 
     assert result.is_safe_to_trade
     assert broker.cash == Decimal("750")
-    assert broker.position_quantity(BTC) == Decimal("2")
-    assert broker.position_quantity(ETH) == Decimal("1")
+    assert broker.position_quantity(BTC) == Decimal("3")
+
+
+def test_foreign_order_decision_and_cursor_scopes_are_unsafe(tmp_path) -> None:
+    repository = make_repository(tmp_path / "paper.db")
+    broker = recover(repository)
+    foreign_order = Order(
+        order_id="foreign-order",
+        instrument=ETH,
+        side=OrderSide.BUY,
+        quantity=Decimal("1"),
+        strategy_id="ma",
+        submitted_at=T0,
+        status=OrderStatus.CANCELED,
+    )
+    repository.save_order(foreign_order)
+    pending = make_order("foreign-decision")
+    repository.register_order_submission(
+        PaperDecisionKey(PaperCursorScope(BTC, "ma", "minute60"), T1),
+        pending,
+    )
+    repository.save_last_processed_bar_timestamp(
+        PaperCursorScope(BTC, "other", "day"), T1
+    )
+
+    result = reconcile_paper_runtime(broker, repository, cursor_scope=SCOPE)
+
+    assert_issue(result, "order outside session scope")
+    assert_issue(result, "decision outside session scope")
+    assert_issue(result, "cursor outside session scope")
 
 
 def test_broker_only_and_repository_only_orders_are_unsafe(tmp_path) -> None:

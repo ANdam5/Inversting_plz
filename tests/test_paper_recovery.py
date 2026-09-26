@@ -6,6 +6,7 @@ import pytest
 
 from investing_plz.application import (
     PaperPollingScheduler,
+    PaperSessionConfigurationError,
     recover_paper_runtime,
     run_paper_cycle,
 )
@@ -221,7 +222,7 @@ def test_restart_recovers_buy_account_orders_fills_cursor_without_factory_use(
     assert submitted_times == [T2]
 
 
-def test_multiple_buy_sell_and_instruments_recover_one_cash_pool(tmp_path) -> None:
+def test_foreign_instrument_order_prevents_recovery(tmp_path) -> None:
     repository = make_repository(tmp_path / "paper.db")
     btc_buy = make_order(
         "btc-buy", quantity=Decimal("2"), status=OrderStatus.FILLED
@@ -278,12 +279,53 @@ def test_multiple_buy_sell_and_instruments_recover_one_cash_pool(tmp_path) -> No
     for order, fill, timestamp in executions:
         persist_execution(repository, order, fill, timestamp=timestamp)
 
-    broker = recover(repository).broker
+    with pytest.raises(
+        PaperSessionConfigurationError, match="outside the Paper session scope"
+    ):
+        recover(repository)
 
-    assert broker.cash == Decimal("868.3")
-    assert broker.position_quantity(BTC) == Decimal("1")
-    assert broker.position_quantity(ETH) == Decimal("1")
-    assert broker.list_fills() == tuple(item[1] for item in executions)
+
+def test_foreign_strategy_order_prevents_recovery(tmp_path) -> None:
+    repository = make_repository(tmp_path / "paper.db")
+    recover(repository)
+    repository.save_order(
+        make_order(
+            "foreign-strategy",
+            strategy_id="other-strategy",
+            status=OrderStatus.CANCELED,
+        )
+    )
+
+    with pytest.raises(
+        PaperSessionConfigurationError, match="outside the Paper session scope"
+    ):
+        recover(repository)
+
+
+def test_foreign_decision_timeframe_prevents_recovery(tmp_path) -> None:
+    repository = make_repository(tmp_path / "paper.db")
+    recover(repository)
+    foreign_scope = PaperCursorScope(BTC, "ma", "minute60")
+    pending = make_order("foreign-decision")
+    repository.register_order_submission(
+        PaperDecisionKey(foreign_scope, T0), pending
+    )
+
+    with pytest.raises(
+        PaperSessionConfigurationError, match="decision is outside"
+    ):
+        recover(repository)
+
+
+def test_foreign_cursor_scope_prevents_recovery(tmp_path) -> None:
+    repository = make_repository(tmp_path / "paper.db")
+    recover(repository)
+    repository.save_last_processed_bar_timestamp(
+        PaperCursorScope(ETH, "ma", "day"), T0
+    )
+
+    with pytest.raises(PaperSessionConfigurationError, match="cursor is outside"):
+        recover(repository)
 
 
 def test_all_order_statuses_restore_without_changing_account(tmp_path) -> None:
