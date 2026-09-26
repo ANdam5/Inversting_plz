@@ -75,8 +75,8 @@ class PaperPollingScheduler:
         if self._next_poll_at is not None and now < self._next_poll_at:
             return PaperPollResult(False, False, None, False, None)
 
-        bars = tuple(self._closed_bars_provider())
         self._next_poll_at = now + self._poll_interval
+        bars = tuple(self._closed_bars_provider())
         if not bars:
             safety_result = (
                 None

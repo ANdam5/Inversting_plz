@@ -67,3 +67,39 @@ def test_provider_returns_public_current_price_as_decimal() -> None:
     request = opener.call_args.args[0]
     assert request.full_url == "https://api.upbit.com/v1/ticker?markets=KRW-BTC"
     assert opener.call_args.kwargs == {"timeout": 2.0}
+
+
+def test_candle_fractional_json_numbers_are_parsed_losslessly() -> None:
+    payload = b"""[
+        {
+            "market": "KRW-BTC",
+            "candle_date_time_utc": "2026-09-24T00:00:00",
+            "opening_price": 100.1234567890123456789,
+            "high_price": 101.1234567890123456789,
+            "low_price": 99.1234567890123456789,
+            "trade_price": 100.2234567890123456789,
+            "candle_acc_trade_volume": 0.1234567890123456789
+        }
+    ]"""
+    provider = UpbitMarketDataProvider(
+        opener=lambda *_args, **_kwargs: FakeResponse(payload)
+    )
+
+    bar = provider.get_bars(Instrument("upbit", "KRW-BTC"), "day")[0]
+
+    assert bar.open == Decimal("100.1234567890123456789")
+    assert bar.high == Decimal("101.1234567890123456789")
+    assert bar.low == Decimal("99.1234567890123456789")
+    assert bar.close == Decimal("100.2234567890123456789")
+    assert bar.volume == Decimal("0.1234567890123456789")
+
+
+def test_current_price_fractional_json_number_is_parsed_losslessly() -> None:
+    payload = b'[{"market":"KRW-BTC","trade_price":100.1234567890123456789}]'
+    provider = UpbitMarketDataProvider(
+        opener=lambda *_args, **_kwargs: FakeResponse(payload)
+    )
+
+    price = provider.get_current_price(Instrument("upbit", "KRW-BTC"))
+
+    assert price == Decimal("100.1234567890123456789")

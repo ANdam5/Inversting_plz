@@ -21,6 +21,7 @@ from investing_plz.strategy import Signal, SignalType
 INSTRUMENT = Instrument("upbit", "KRW-BTC")
 BAR_OPEN = datetime(2026, 9, 25, tzinfo=timezone.utc)
 BAR_COMPLETION = BAR_OPEN + timedelta(days=1)
+NEXT_EXPECTED_COMPLETION = BAR_OPEN + timedelta(days=2)
 
 
 @dataclass
@@ -99,27 +100,60 @@ def test_manual_kill_switch_defaults_disabled_and_can_toggle() -> None:
     assert not switch.is_trading_enabled
 
 
-def test_freshness_uses_daily_completion_and_boundary_is_fresh() -> None:
+@pytest.mark.parametrize(
+    "now",
+    [
+        BAR_COMPLETION + timedelta(minutes=5),
+        BAR_COMPLETION + timedelta(hours=12),
+    ],
+)
+def test_latest_closed_daily_bar_remains_fresh_during_next_open_candle(now) -> None:
     switch = ManualKillSwitch(trading_enabled=True)
-    delay = timedelta(hours=1)
-
-    before_boundary = evaluate_paper_safety(
+    result = evaluate_paper_safety(
         make_bar(),
-        now=BAR_COMPLETION + timedelta(minutes=30),
-        max_data_delay=delay,
+        now=now,
+        max_data_delay=timedelta(minutes=5),
         kill_switch=switch,
         reconciliation=safe_reconciliation(),
     )
+
+    assert result.is_safe_to_trade
+
+
+def test_next_daily_completion_delay_boundary_is_fresh_then_stale() -> None:
+    switch = ManualKillSwitch(trading_enabled=True)
+    delay = timedelta(minutes=5)
+
     at_boundary = evaluate_paper_safety(
         make_bar(),
-        now=BAR_COMPLETION + delay,
+        now=NEXT_EXPECTED_COMPLETION + delay,
+        max_data_delay=delay,
+        kill_switch=switch,
+        reconciliation=safe_reconciliation(),
+    )
+    after_boundary = evaluate_paper_safety(
+        make_bar(),
+        now=NEXT_EXPECTED_COMPLETION + delay + timedelta(microseconds=1),
         max_data_delay=delay,
         kill_switch=switch,
         reconciliation=safe_reconciliation(),
     )
 
-    assert before_boundary.is_safe_to_trade
     assert at_boundary.is_safe_to_trade
+    assert not after_boundary.is_safe_to_trade
+    assert "stale market data" in after_boundary.issues[0]
+
+
+def test_newly_closed_next_daily_bar_restores_freshness() -> None:
+    result = evaluate_paper_safety(
+        make_bar(BAR_OPEN + timedelta(days=1)),
+        now=NEXT_EXPECTED_COMPLETION + timedelta(minutes=6),
+        max_data_delay=timedelta(minutes=5),
+        kill_switch=ManualKillSwitch(trading_enabled=True),
+        reconciliation=safe_reconciliation(),
+    )
+
+    assert result.is_safe_to_trade
 
 
 def test_stale_future_no_data_and_unsupported_timeframe_are_blocked() -> None:
@@ -128,7 +162,7 @@ def test_stale_future_no_data_and_unsupported_timeframe_are_blocked() -> None:
 
     stale = evaluate_paper_safety(
         make_bar(),
-        now=BAR_COMPLETION + timedelta(hours=1, microseconds=1),
+        now=NEXT_EXPECTED_COMPLETION + timedelta(hours=1, microseconds=1),
         max_data_delay=timedelta(hours=1),
         kill_switch=switch,
         reconciliation=reconciliation,
@@ -187,12 +221,17 @@ def test_delay_validation_and_zero_delay_completion_boundary() -> None:
     [
         (True, PaperReconciliationResult(()), BAR_COMPLETION, True),
         (True, PaperReconciliationResult(("cash mismatch",)), BAR_COMPLETION, False),
-        (True, PaperReconciliationResult(()), BAR_COMPLETION + timedelta(hours=2), False),
+        (
+            True,
+            PaperReconciliationResult(()),
+            NEXT_EXPECTED_COMPLETION + timedelta(hours=2),
+            False,
+        ),
         (False, PaperReconciliationResult(()), BAR_COMPLETION, False),
         (
             False,
             PaperReconciliationResult(("cash mismatch",)),
-            BAR_COMPLETION + timedelta(hours=2),
+            NEXT_EXPECTED_COMPLETION + timedelta(hours=2),
             False,
         ),
     ],
@@ -209,12 +248,16 @@ def test_combined_safety_requires_reconciliation_freshness_and_enabled_switch(
     )
 
     assert result.is_safe_to_trade is safe
-    if not enabled and reconciliation.issues and now > BAR_COMPLETION + timedelta(hours=1):
+    if (
+        not enabled
+        and reconciliation.issues
+        and now > NEXT_EXPECTED_COMPLETION + timedelta(hours=1)
+    ):
         assert len(result.issues) == 3
 
 
 def test_scheduler_blocks_stale_before_price_cycle_and_cursor() -> None:
-    clock = MutableClock(BAR_COMPLETION + timedelta(hours=2))
+    clock = MutableClock(NEXT_EXPECTED_COMPLETION + timedelta(hours=2))
     price_calls = 0
     cycle_calls = 0
     saved = []

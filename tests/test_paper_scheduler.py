@@ -350,6 +350,92 @@ def test_cycle_exception_keeps_cursor_and_allows_next_due_retry() -> None:
     assert saved == [bar.timestamp]
 
 
+def test_closed_bars_failure_consumes_poll_cadence_then_recovers() -> None:
+    clock = MutableClock(START)
+    bar = make_bar(25)
+    provider_calls = 0
+    cycle_calls = 0
+    saved: list[datetime] = []
+
+    def bars_provider():
+        nonlocal provider_calls
+        provider_calls += 1
+        if provider_calls == 1:
+            raise RuntimeError("market data unavailable")
+        return [bar]
+
+    def cycle_runner(bars, price):
+        nonlocal cycle_calls
+        cycle_calls += 1
+        return neutral_result(bars[-1])
+
+    scheduler = make_scheduler(
+        clock=clock,
+        bars_provider=bars_provider,
+        price_provider=lambda: Decimal("100"),
+        cycle_runner=cycle_runner,
+        cursor_saver=saved.append,
+    )
+
+    with pytest.raises(RuntimeError, match="market data unavailable"):
+        scheduler.run_if_due()
+    clock.advance(timedelta(seconds=0.25))
+    assert not scheduler.run_if_due().poll_due
+    clock.advance(timedelta(minutes=1) - timedelta(seconds=0.26))
+    assert not scheduler.run_if_due().poll_due
+    assert provider_calls == 1
+    assert scheduler.last_processed_bar_timestamp is None
+    assert saved == []
+
+    clock.advance(timedelta(seconds=0.01))
+    result = scheduler.run_if_due()
+
+    assert result.processed
+    assert provider_calls == 2
+    assert cycle_calls == 1
+    assert scheduler.last_processed_bar_timestamp == bar.timestamp
+    assert saved == [bar.timestamp]
+
+
+def test_execution_price_failure_obeys_cadence_and_retries_same_bar() -> None:
+    clock = MutableClock(START)
+    bar = make_bar(25)
+    price_calls = 0
+    cycle_calls = 0
+
+    def price_provider():
+        nonlocal price_calls
+        price_calls += 1
+        if price_calls == 1:
+            raise RuntimeError("price unavailable")
+        return Decimal("100")
+
+    def cycle_runner(bars, price):
+        nonlocal cycle_calls
+        cycle_calls += 1
+        return neutral_result(bars[-1])
+
+    scheduler = make_scheduler(
+        clock=clock,
+        bars_provider=lambda: [bar],
+        price_provider=price_provider,
+        cycle_runner=cycle_runner,
+    )
+
+    with pytest.raises(RuntimeError, match="price unavailable"):
+        scheduler.run_if_due()
+    assert scheduler.last_processed_bar_timestamp is None
+    assert not scheduler.run_if_due().poll_due
+
+    clock.advance(timedelta(minutes=1))
+    result = scheduler.run_if_due()
+
+    assert result.processed
+    assert price_calls == 2
+    assert cycle_calls == 1
+    assert scheduler.last_processed_bar_timestamp == bar.timestamp
+
+
 def test_cursor_save_failure_keeps_memory_cursor_and_retries_same_bar() -> None:
     clock = MutableClock(START)
     bar = make_bar(25)

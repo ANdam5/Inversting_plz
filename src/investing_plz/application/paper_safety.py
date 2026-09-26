@@ -73,12 +73,14 @@ def evaluate_paper_safety(
         )
         return PaperSafetyResult(tuple(issues))
 
-    expected_completion = latest_closed_bar.timestamp + timedelta(days=1)
-    if expected_completion > now:
+    latest_completion = latest_closed_bar.timestamp + timedelta(days=1)
+    if latest_completion > now:
         issues.append("latest Bar completion is in the future")
-    elif now - expected_completion > max_data_delay:
-        issues.append(
-            "stale market data: expected completion="
-            f"{expected_completion.isoformat()} now={now.isoformat()}"
-        )
+    else:
+        next_expected_completion = latest_completion + timedelta(days=1)
+        if now > next_expected_completion + max_data_delay:
+            issues.append(
+                "stale market data: next expected completion="
+                f"{next_expected_completion.isoformat()} now={now.isoformat()}"
+            )
     return PaperSafetyResult(tuple(issues))

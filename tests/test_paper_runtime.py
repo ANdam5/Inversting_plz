@@ -172,7 +172,7 @@ def test_disabled_and_stale_runs_do_not_read_price_or_advance_cursor(tmp_path) -
     stale = run_once(
         stale_repo,
         stale_market,
-        now=NOW + timedelta(hours=1),
+        now=NOW + timedelta(days=1, hours=1),
         max_delay=timedelta(minutes=30),
     )
 
@@ -265,27 +265,36 @@ def test_continuous_runtime_retries_network_failure_and_stops_gracefully(
     market = FlakyMarket(bars("3", "2", "1", "4"))
     sleep_calls = 0
 
-    def stop_after_second_iteration(seconds):
+    class MutableRuntimeClock:
+        def __init__(self) -> None:
+            self.current = NOW
+
+        def now(self):
+            return self.current
+
+    clock = MutableRuntimeClock()
+
+    def advance_and_stop(seconds):
         nonlocal sleep_calls
         sleep_calls += 1
+        clock.current += timedelta(minutes=1)
         if sleep_calls == 2:
             raise KeyboardInterrupt
 
-    clock = FixedClock(NOW)
     result = run_paper_runtime(
         config(),
         repository=repository,
         market_data=market,
         clock=clock,
         poll_interval=timedelta(minutes=1),
-        max_data_delay=timedelta(0),
+        max_data_delay=timedelta(minutes=1),
         trading_enabled=True,
         once=False,
         order_id_factory=lambda: "order-1",
         fill_id_factory=lambda: "fill-1",
         correlation_id_factory=lambda: "correlation-1",
         submitted_at_factory=clock.now,
-        sleeper=stop_after_second_iteration,
+        sleeper=advance_and_stop,
     )
 
     assert market.bar_calls == 2

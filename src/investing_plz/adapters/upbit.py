@@ -30,11 +30,13 @@ def upbit_candle_to_bar(
             instrument=instrument,
             interval=interval,
             timestamp=timestamp.replace(tzinfo=timezone.utc),
-            open=Decimal(str(candle["opening_price"])),
-            high=Decimal(str(candle["high_price"])),
-            low=Decimal(str(candle["low_price"])),
-            close=Decimal(str(candle["trade_price"])),
-            volume=Decimal(str(candle["candle_acc_trade_volume"])),
+            open=_financial_decimal(candle["opening_price"], "opening_price"),
+            high=_financial_decimal(candle["high_price"], "high_price"),
+            low=_financial_decimal(candle["low_price"], "low_price"),
+            close=_financial_decimal(candle["trade_price"], "trade_price"),
+            volume=_financial_decimal(
+                candle["candle_acc_trade_volume"], "candle_acc_trade_volume"
+            ),
         )
     except (KeyError, TypeError, ValueError, ArithmeticError) as error:
         raise MarketDataValidationError(f"invalid Upbit candle: {error}") from error
@@ -119,7 +121,7 @@ class UpbitMarketDataProvider:
         try:
             if not isinstance(payload, list) or len(payload) != 1:
                 raise ValueError("ticker response must contain one item")
-            price = Decimal(str(payload[0]["trade_price"]))
+            price = _financial_decimal(payload[0]["trade_price"], "trade_price")
             if price <= 0:
                 raise ValueError("trade_price must be greater than zero")
             return price
@@ -166,8 +168,12 @@ class UpbitMarketDataProvider:
             raise MarketDataProviderError(f"Upbit request failed: {error.reason}") from error
 
         try:
-            return json.loads(payload_text)
-        except json.JSONDecodeError as error:
+            return json.loads(
+                payload_text,
+                parse_float=Decimal,
+                parse_constant=_reject_non_finite_json_number,
+            )
+        except (json.JSONDecodeError, ValueError) as error:
             raise MarketDataValidationError("Upbit returned invalid JSON") from error
 
 
@@ -179,3 +185,14 @@ def _validate_upbit_page_order(bars: Sequence[Bar]) -> None:
         raise MarketDataValidationError(
             "Upbit candle page must be in descending timestamp order"
         )
+
+
+def _financial_decimal(value: object, field: str) -> Decimal:
+    result = Decimal(str(value))
+    if not result.is_finite():
+        raise ValueError(f"{field} must be finite")
+    return result
+
+
+def _reject_non_finite_json_number(value: str) -> None:
+    raise ValueError(f"non-finite JSON number is not allowed: {value}")

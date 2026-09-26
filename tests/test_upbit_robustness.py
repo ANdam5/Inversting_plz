@@ -159,6 +159,33 @@ def test_malformed_ohlcv_fails_clearly(overrides) -> None:
         provider.get_bars(Instrument("upbit", "KRW-BTC"), "day")
 
 
+@pytest.mark.parametrize("non_finite", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_json_financial_numbers_are_rejected(non_finite) -> None:
+    candle_payload = encoded(
+        [
+            candle(
+                datetime(2026, 9, 24, tzinfo=timezone.utc),
+                trade_price=non_finite,
+            )
+        ]
+    )
+    ticker_payload = (
+        f'[{{"market":"KRW-BTC","trade_price":{non_finite}}}]'.encode()
+    )
+
+    candle_provider = UpbitMarketDataProvider(
+        opener=lambda *_args, **_kwargs: candle_payload
+    )
+    ticker_provider = UpbitMarketDataProvider(
+        opener=lambda *_args, **_kwargs: FakeResponse(ticker_payload)
+    )
+
+    with pytest.raises(MarketDataValidationError):
+        candle_provider.get_bars(Instrument("upbit", "KRW-BTC"), "day")
+    with pytest.raises(MarketDataValidationError, match="invalid JSON"):
+        ticker_provider.get_current_price(Instrument("upbit", "KRW-BTC"))
+
+
 def test_duplicate_timestamp_in_page_fails_clearly() -> None:
     item = candle(datetime(2026, 9, 24, tzinfo=timezone.utc))
     provider = UpbitMarketDataProvider(
