@@ -38,13 +38,15 @@ Strategy parameter를 `default < instrument/profile < runtime override` 순서�
 
 Dataset·Strategy·sizing·Risk·cost·version 실행조건을 immutable metadata로 기록한다. Canonical metadata JSON의 SHA-256 fingerprint와 동일 입력의 결과 재현성을 검증한다.
 
-## M4 — Paper Trading (다음 단계)
+## M4 — Paper Trading (진행 중)
 
 Clock, Order/OrderStatus, Broker contract, PaperBroker, Storage repository를 실제 Paper 요구사항에 맞춰 추가한다. Idempotency, 주문·체결 영속화, 재시작 복구, reconciliation, stale data 차단, 로그와 kill switch를 단계적으로 검증한다.
 
+Paper 실행 비용은 Backtest와 같은 provider-neutral Decimal 계산 함수를 재사용한다. 구현체가 하나뿐인 현재 단계에서는 fee/slippage model port를 별도로 만들지 않는다.
+
 ## M5 — Upbit Live Trading
 
-Upbit 인증 Broker adapter, 잔고·주문·체결 변환, 거래 단위와 최소 주문 규칙, 안전한 retry와 시작 시 reconciliation을 구현한다. Dry-run과 명시적 enable을 거쳐 소액·단일 Instrument부터 운영한다.
+Upbit 인증 Broker adapter, 잔고·주문·체결 변환, 거래 단위와 최소 주문 규칙, 안전한 retry와 시작 시 reconciliation을 구현한다. 실제 Upbit 비용 정책과 Paper/Live 정책 교체 요구가 확인될 때만 fee/slippage model port를 추출한다. Dry-run과 명시적 enable을 거쳐 소액·단일 Instrument부터 운영한다.
 
 ## M6 이후 — 확장
 

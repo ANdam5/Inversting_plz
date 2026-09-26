@@ -128,8 +128,6 @@
 - [x] Paper Order·Fill·cursor repository protocol과 SQLite 구현의 재개방 round-trip을 테스트한다.
 - [x] `Order`, `OrderStatus` 모델을 정의하고 유효한 상태 전이를 테스트한다.
 - [x] Broker protocol을 정의하고 메모리 fake로 주문 contract를 테스트한다.
-- [ ] 수수료 모델 port를 구현하고 Upbit fee fixture를 테스트한다.
-- [ ] slippage 모델 port를 구현하고 0/고정 slippage를 테스트한다.
 - [x] paper broker의 명시적 Order/Fill 생명주기를 구현하고 Broker 주문 contract를 통과시킨다.
 - [x] paper broker의 cash/position 및 비용 반영 실행을 구현하고 테스트한다.
 - [x] closed Bar부터 PaperBroker 실행까지 단일 paper cycle을 연결하고 테스트한다.
@@ -145,6 +143,8 @@
 
 ## M5 — Upbit Live
 
+- [ ] Upbit Live 비용 정책을 확인하고 실제 필요 시 fee model port와 Upbit fee fixture를 추가한다.
+- [ ] Paper/Live 비용 정책의 교체 필요성이 확인되면 slippage model port를 추출한다.
 - [ ] Upbit 인증 서명 생성을 공식 fixture로 테스트한다.
 - [ ] Upbit 잔고 응답을 표준 balance로 변환하고 fixture로 테스트한다.
 - [ ] Upbit 주문 응답을 표준 Order로 변환하고 fixture로 테스트한다.
