@@ -20,6 +20,11 @@ from investing_plz.application.paper_scheduler import (
     PaperPollingScheduler,
     PaperPollResult,
 )
+from investing_plz.application.paper_safety import (
+    ManualKillSwitch,
+    PaperSafetyResult,
+    evaluate_paper_safety,
+)
 
 __all__ = [
     "PaperCycleResult",
@@ -28,6 +33,9 @@ __all__ = [
     "PaperRecoveryResult",
     "PaperReconciliationResult",
     "PaperTradingNotReadyError",
+    "ManualKillSwitch",
+    "PaperSafetyResult",
+    "evaluate_paper_safety",
     "reconcile_paper_runtime",
     "recover_paper_runtime",
     "run_when_paper_ready",

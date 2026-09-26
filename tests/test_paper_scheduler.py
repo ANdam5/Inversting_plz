@@ -88,6 +88,7 @@ def make_scheduler(
     cycle_runner,
     interval: timedelta = timedelta(minutes=1),
     cursor_saver=None,
+    safety_evaluator=None,
 ) -> PaperPollingScheduler:
     return PaperPollingScheduler(
         clock=clock,
@@ -96,6 +97,7 @@ def make_scheduler(
         execution_price_provider=price_provider,
         cycle_runner=cycle_runner,
         cursor_saver=cursor_saver,
+        safety_evaluator=safety_evaluator,
     )
 
 
