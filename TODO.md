@@ -139,6 +139,7 @@
 - [x] stale market data 차단 규칙을 구현하고 신규 주문 거부를 테스트한다.
 - [x] restart-safe Paper runtime ID와 구조화 로그에 cycle/order correlation ID를 추가하고 로그 capture로 테스트한다.
 - [x] kill switch를 구현하고 활성화 중 주문 미제출을 테스트한다.
+- [x] durable Paper session configuration을 저장하고 restart 설정 불일치를 차단한다.
 - [ ] paper trading CLI를 추가하고 fake market feed로 end-to-end 테스트한다.
 
 ## M5 — Upbit Live

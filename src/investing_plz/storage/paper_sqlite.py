@@ -10,6 +10,7 @@ from investing_plz.storage.paper import (
     PaperCursorScope,
     PaperDecisionKey,
     PaperOrderDecision,
+    PaperSessionConfig,
 )
 
 
@@ -71,8 +72,66 @@ class SQLitePaperRepository:
                     ),
                     FOREIGN KEY (order_id) REFERENCES paper_orders(order_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS paper_session_configs (
+                    venue TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    strategy_id TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    fast_window INTEGER NOT NULL,
+                    slow_window INTEGER NOT NULL,
+                    target_weight TEXT NOT NULL,
+                    quantity_step TEXT NOT NULL,
+                    min_trade_amount TEXT NOT NULL,
+                    initial_cash TEXT NOT NULL,
+                    max_order_amount TEXT NOT NULL,
+                    max_instrument_weight TEXT NOT NULL,
+                    min_cash_reserve TEXT NOT NULL,
+                    fee_rate TEXT NOT NULL,
+                    slippage_bps TEXT NOT NULL,
+                    PRIMARY KEY (venue, symbol, strategy_id, timeframe)
+                );
                 """
             )
+
+    def register_session_config(self, config: PaperSessionConfig) -> bool:
+        if not isinstance(config, PaperSessionConfig):
+            raise TypeError("config must be a PaperSessionConfig")
+        with self._connect() as connection:
+            row = connection.execute(
+                _SELECT_SESSION_CONFIG + _SESSION_CONFIG_WHERE,
+                _scope_values(config.scope),
+            ).fetchone()
+            if row is not None:
+                if _row_to_session_config(row) != config:
+                    raise ValueError(
+                        "paper session configuration mismatch for scope"
+                    )
+                return False
+            connection.execute(
+                """
+                INSERT INTO paper_session_configs (
+                    venue, symbol, strategy_id, timeframe,
+                    fast_window, slow_window, target_weight,
+                    quantity_step, min_trade_amount, initial_cash,
+                    max_order_amount, max_instrument_weight,
+                    min_cash_reserve, fee_rate, slippage_bps
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                _session_config_values(config),
+            )
+            return True
+
+    def get_session_config(
+        self, scope: PaperCursorScope
+    ) -> PaperSessionConfig | None:
+        _require_scope(scope)
+        with self._connect() as connection:
+            row = connection.execute(
+                _SELECT_SESSION_CONFIG + _SESSION_CONFIG_WHERE,
+                _scope_values(scope),
+            ).fetchone()
+        return None if row is None else _row_to_session_config(row)
 
     def save_order(self, order: Order) -> None:
         if not isinstance(order, Order):
@@ -303,6 +362,18 @@ SELECT fill_id, order_id, venue, symbol, side, quantity,
 FROM paper_fills
 """
 
+_SELECT_SESSION_CONFIG = """
+SELECT venue, symbol, strategy_id, timeframe, fast_window, slow_window,
+       target_weight, quantity_step, min_trade_amount, initial_cash,
+       max_order_amount, max_instrument_weight, min_cash_reserve,
+       fee_rate, slippage_bps
+FROM paper_session_configs
+"""
+
+_SESSION_CONFIG_WHERE = """
+WHERE venue = ? AND symbol = ? AND strategy_id = ? AND timeframe = ?
+"""
+
 _SELECT_DECISION_ORDER = """
 SELECT o.order_id, o.venue, o.symbol, o.side, o.quantity,
        o.strategy_id, o.submitted_at, o.status
@@ -379,6 +450,42 @@ def _row_to_fill(row: tuple[str, ...]) -> ExecutionFill:
         fee_amount=Decimal(row[7]),
         filled_at=datetime.fromisoformat(row[8]),
         strategy_id=row[9],
+    )
+
+
+def _session_config_values(config: PaperSessionConfig) -> tuple[object, ...]:
+    return (
+        *_scope_values(config.scope),
+        config.fast_window,
+        config.slow_window,
+        str(config.target_weight),
+        str(config.quantity_step),
+        str(config.min_trade_amount),
+        str(config.initial_cash),
+        str(config.max_order_amount),
+        str(config.max_instrument_weight),
+        str(config.min_cash_reserve),
+        str(config.fee_rate),
+        str(config.slippage_bps),
+    )
+
+
+def _row_to_session_config(row: tuple[object, ...]) -> PaperSessionConfig:
+    return PaperSessionConfig(
+        instrument=Instrument(str(row[0]), str(row[1])),
+        strategy_id=str(row[2]),
+        timeframe=str(row[3]),
+        fast_window=int(row[4]),
+        slow_window=int(row[5]),
+        target_weight=Decimal(str(row[6])),
+        quantity_step=Decimal(str(row[7])),
+        min_trade_amount=Decimal(str(row[8])),
+        initial_cash=Decimal(str(row[9])),
+        max_order_amount=Decimal(str(row[10])),
+        max_instrument_weight=Decimal(str(row[11])),
+        min_cash_reserve=Decimal(str(row[12])),
+        fee_rate=Decimal(str(row[13])),
+        slippage_bps=Decimal(str(row[14])),
     )
 
 

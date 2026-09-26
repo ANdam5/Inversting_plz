@@ -26,6 +26,7 @@ from investing_plz.risk import BasicRiskManager, RiskLimits
 from investing_plz.storage import (
     PaperCursorScope,
     PaperDecisionKey,
+    PaperSessionConfig,
     SQLitePaperRepository,
 )
 from investing_plz.strategy import Signal, SignalType
@@ -137,10 +138,27 @@ def persist_filled(
 
 
 def recover(repository, initial_cash: Decimal = Decimal("1000")) -> PaperBroker:
+    config = PaperSessionConfig(
+        instrument=BTC,
+        strategy_id="ma",
+        timeframe="day",
+        fast_window=20,
+        slow_window=60,
+        target_weight=Decimal("0.10"),
+        quantity_step=Decimal("0.00000001"),
+        min_trade_amount=Decimal("0"),
+        initial_cash=initial_cash,
+        max_order_amount=Decimal("1000"),
+        max_instrument_weight=Decimal("1"),
+        min_cash_reserve=Decimal("0"),
+        fee_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+    )
+    if repository.get_session_config(SCOPE) is None:
+        repository.register_session_config(config)
     return recover_paper_runtime(
         repository,
-        SCOPE,
-        initial_cash=initial_cash,
+        config,
         order_id_factory=lambda: "future-order",
         submitted_at_factory=lambda: T1,
     ).broker

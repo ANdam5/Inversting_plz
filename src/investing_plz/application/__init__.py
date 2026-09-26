@@ -8,6 +8,7 @@ __all__ = ["create_target_weight_order_intent"]
 from investing_plz.application.paper_cycle import PaperCycleResult, run_paper_cycle
 from investing_plz.application.paper_recovery import (
     PaperRecoveryResult,
+    PaperSessionConfigurationError,
     recover_paper_runtime,
 )
 from investing_plz.application.paper_reconciliation import (
@@ -36,6 +37,7 @@ __all__ = [
     "PaperPollingScheduler",
     "PaperPollResult",
     "PaperRecoveryResult",
+    "PaperSessionConfigurationError",
     "PaperReconciliationResult",
     "PaperTradingNotReadyError",
     "ManualKillSwitch",

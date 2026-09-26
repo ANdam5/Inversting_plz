@@ -5,6 +5,7 @@ from investing_plz.storage.paper import (
     PaperDecisionKey,
     PaperOrderDecision,
     PaperRepository,
+    PaperSessionConfig,
 )
 from investing_plz.storage.paper_sqlite import SQLitePaperRepository
 from investing_plz.storage.sqlite import SQLiteBarStore
@@ -14,6 +15,7 @@ __all__ = [
     "PaperDecisionKey",
     "PaperOrderDecision",
     "PaperRepository",
+    "PaperSessionConfig",
     "SQLiteBarStore",
     "SQLitePaperRepository",
 ]

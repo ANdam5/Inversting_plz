@@ -23,6 +23,7 @@ from investing_plz.risk import BasicRiskManager, RiskLimits
 from investing_plz.storage import (
     PaperCursorScope,
     PaperDecisionKey,
+    PaperSessionConfig,
     SQLitePaperRepository,
 )
 from investing_plz.strategy import Signal, SignalType
@@ -132,12 +133,27 @@ def recover(
 ):
     order_ids = order_ids if order_ids is not None else ["new-order"]
     submitted_times = submitted_times if submitted_times is not None else [T2]
-    return recover_paper_runtime(
-        repository,
-        SCOPE,
+    config = PaperSessionConfig(
+        instrument=BTC,
+        strategy_id="ma",
+        timeframe="day",
+        fast_window=20,
+        slow_window=60,
+        target_weight=Decimal("0.10"),
+        quantity_step=Decimal("0.00000001"),
+        min_trade_amount=Decimal("10000"),
         initial_cash=initial_cash,
+        max_order_amount=Decimal("500000"),
+        max_instrument_weight=Decimal("0.20"),
+        min_cash_reserve=Decimal("0"),
         fee_rate=Decimal("0.001"),
         slippage_bps=Decimal("5"),
+    )
+    if repository.get_session_config(SCOPE) is None:
+        repository.register_session_config(config)
+    return recover_paper_runtime(
+        repository,
+        config,
         order_id_factory=lambda: order_ids.pop(0),
         submitted_at_factory=lambda: submitted_times.pop(0),
     )
