@@ -25,25 +25,24 @@ def make_intent(*, side: OrderSide = OrderSide.BUY) -> OrderIntent:
 def make_broker() -> PaperBroker:
     identifiers = iter(("order-1", "order-2", "order-3"))
     return PaperBroker(
+        initial_cash=Decimal("10000000"),
         order_id_factory=lambda: next(identifiers),
         submitted_at_factory=lambda: SUBMITTED_AT,
     )
 
 
-def fill_order(
+def execute_order(
     broker: PaperBroker,
     order_id: str,
     **overrides: object,
-) -> ExecutionFill:
+) -> ExecutionFill | None:
     values: dict[str, object] = {
         "fill_id": "fill-1",
-        "quantity": Decimal("0.01"),
-        "fill_price": Decimal("100000000"),
-        "fee_amount": Decimal("500"),
+        "reference_price": Decimal("100000000"),
         "filled_at": FILLED_AT,
     }
     values.update(overrides)
-    return broker.fill_order(order_id, **values)
+    return broker.execute_order(order_id, **values)
 
 
 def test_paper_broker_satisfies_existing_order_contract() -> None:
@@ -59,14 +58,14 @@ def test_paper_broker_satisfies_existing_order_contract() -> None:
     assert broker.list_open_orders() == ()
 
 
-@pytest.mark.parametrize("side", [OrderSide.BUY, OrderSide.SELL])
-def test_pending_order_fills_and_preserves_order_identity(side: OrderSide) -> None:
+def test_pending_buy_order_fills_and_preserves_order_identity() -> None:
     broker = make_broker()
-    original = broker.submit(make_intent(side=side))
+    original = broker.submit(make_intent())
 
-    fill = fill_order(broker, original.order_id)
+    fill = execute_order(broker, original.order_id)
 
     stored = broker.get_order(original.order_id)
+    assert fill is not None
     assert original.status is OrderStatus.PENDING
     assert stored is not None
     assert stored.status is OrderStatus.FILLED
@@ -79,13 +78,31 @@ def test_pending_order_fills_and_preserves_order_identity(side: OrderSide) -> No
     assert broker.list_fills() == (fill,)
 
 
+def test_pending_sell_order_uses_the_same_lifecycle() -> None:
+    broker = make_broker()
+    buy = broker.submit(make_intent())
+    assert execute_order(broker, buy.order_id) is not None
+    sell = broker.submit(make_intent(side=OrderSide.SELL))
+
+    fill = execute_order(
+        broker,
+        sell.order_id,
+        fill_id="fill-2",
+        reference_price=Decimal("110000000"),
+    )
+
+    assert fill is not None
+    assert fill.side is OrderSide.SELL
+    assert broker.get_order(sell.order_id).status is OrderStatus.FILLED
+
+
 def test_canceled_order_cannot_fill() -> None:
     broker = make_broker()
     order = broker.submit(make_intent())
     broker.cancel_order(order.order_id)
 
     with pytest.raises(ValueError, match="invalid order status transition"):
-        fill_order(broker, order.order_id)
+        execute_order(broker, order.order_id)
 
     assert broker.list_fills() == ()
 
@@ -93,10 +110,10 @@ def test_canceled_order_cannot_fill() -> None:
 def test_filled_order_cannot_fill_again() -> None:
     broker = make_broker()
     order = broker.submit(make_intent())
-    fill_order(broker, order.order_id)
+    execute_order(broker, order.order_id)
 
     with pytest.raises(ValueError, match="invalid order status transition"):
-        fill_order(broker, order.order_id, fill_id="fill-2")
+        execute_order(broker, order.order_id, fill_id="fill-2")
 
     assert len(broker.list_fills()) == 1
 
@@ -110,14 +127,14 @@ def test_rejected_order_cannot_fill() -> None:
     assert rejected.status is OrderStatus.REJECTED
     assert broker.list_open_orders() == ()
     with pytest.raises(ValueError, match="invalid order status transition"):
-        fill_order(broker, order.order_id)
+        execute_order(broker, order.order_id)
 
 
 def test_missing_order_cannot_fill_or_be_rejected() -> None:
     broker = make_broker()
 
     with pytest.raises(KeyError, match="order not found"):
-        fill_order(broker, "missing-order")
+        execute_order(broker, "missing-order")
     with pytest.raises(KeyError, match="order not found"):
         broker.reject_order("missing-order")
 
@@ -126,36 +143,20 @@ def test_duplicate_fill_id_is_rejected_without_changing_second_order() -> None:
     broker = make_broker()
     first = broker.submit(make_intent())
     second = broker.submit(make_intent(side=OrderSide.SELL))
-    fill_order(broker, first.order_id)
+    execute_order(broker, first.order_id)
 
     with pytest.raises(ValueError, match="duplicate fill_id"):
-        fill_order(broker, second.order_id)
+        execute_order(broker, second.order_id)
 
     assert broker.get_order(second.order_id) == second
     assert broker.list_open_orders() == (second,)
 
 
-def test_fill_quantity_must_equal_order_quantity() -> None:
-    broker = make_broker()
-    order = broker.submit(make_intent())
-
-    with pytest.raises(ValueError, match="must equal order quantity"):
-        fill_order(broker, order.order_id, quantity=Decimal("0.005"))
-
-    assert broker.get_order(order.order_id) == order
-    assert broker.list_fills() == ()
-
-
 @pytest.mark.parametrize(
     ("field", "value", "error", "message"),
     [
-        ("quantity", 0.01, TypeError, "quantity must be a Decimal"),
-        ("quantity", Decimal("0"), ValueError, "quantity must be greater"),
-        ("quantity", Decimal("-0.01"), ValueError, "quantity must be greater"),
-        ("fill_price", 100.0, TypeError, "fill_price must be a Decimal"),
-        ("fee_amount", 0.0, TypeError, "fee_amount must be a Decimal"),
-        ("fill_price", Decimal("0"), ValueError, "fill_price must be greater"),
-        ("fee_amount", Decimal("-1"), ValueError, "fee_amount must not be negative"),
+        ("reference_price", 100.0, TypeError, "reference_price must be a Decimal"),
+        ("reference_price", Decimal("0"), ValueError, "reference_price must be greater"),
         ("filled_at", datetime(2026, 9, 26), ValueError, "timezone-aware"),
     ],
 )
@@ -169,7 +170,7 @@ def test_invalid_fill_values_are_rejected_without_changing_order(
     order = broker.submit(make_intent())
 
     with pytest.raises(error, match=message):
-        fill_order(broker, order.order_id, **{field: value})
+        execute_order(broker, order.order_id, **{field: value})
 
     assert broker.get_order(order.order_id) == order
     assert broker.list_fills() == ()
@@ -200,8 +201,8 @@ def test_identical_inputs_produce_identical_order_and_fill_results() -> None:
 
     first_order = first.submit(make_intent())
     second_order = second.submit(make_intent())
-    first_fill = fill_order(first, first_order.order_id)
-    second_fill = fill_order(second, second_order.order_id)
+    first_fill = execute_order(first, first_order.order_id)
+    second_fill = execute_order(second, second_order.order_id)
 
     assert first_order == second_order
     assert first_fill == second_fill
@@ -214,7 +215,8 @@ def test_identical_inputs_produce_identical_order_and_fill_results() -> None:
 def test_execution_fill_is_immutable() -> None:
     broker = make_broker()
     order = broker.submit(make_intent())
-    fill = fill_order(broker, order.order_id)
+    fill = execute_order(broker, order.order_id)
 
+    assert fill is not None
     with pytest.raises(FrozenInstanceError):
         fill.quantity = Decimal("1")  # type: ignore[misc]

@@ -33,9 +33,14 @@ def broker(request: pytest.FixtureRequest) -> Broker:
         )
     )
     broker_type = request.param
+    kwargs = {
+        "order_id_factory": lambda: next(identifiers),
+        "submitted_at_factory": lambda: next(timestamps),
+    }
+    if broker_type is PaperBroker:
+        return broker_type(initial_cash=Decimal("10000000"), **kwargs)
     return broker_type(
-        order_id_factory=lambda: next(identifiers),
-        submitted_at_factory=lambda: next(timestamps),
+        **kwargs,
     )
 
 
