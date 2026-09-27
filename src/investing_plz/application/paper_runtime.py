@@ -149,6 +149,8 @@ def run_paper_runtime(
             quantity_step=session_config.quantity_step,
             min_trade_amount=session_config.min_trade_amount,
             execution_reference_price=reference_price,
+            fee_rate=session_config.fee_rate,
+            slippage_bps=session_config.slippage_bps,
             fill_id_factory=fill_id_factory,
             clock=clock,
             repository=repository,

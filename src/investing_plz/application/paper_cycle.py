@@ -11,6 +11,11 @@ from investing_plz.clock import Clock
 from investing_plz.domain import Bar, Order, OrderIntent, OrderSide
 from investing_plz.domain.decimal import require_decimal
 from investing_plz.domain.time import require_utc
+from investing_plz.execution import (
+    apply_slippage,
+    validate_fee_rate,
+    validate_slippage_bps,
+)
 from investing_plz.risk import RiskContext, RiskDecision, RiskLimits, RiskManager
 from investing_plz.storage.paper import (
     PaperCursorScope,
@@ -44,6 +49,8 @@ def run_paper_cycle(
     quantity_step: Decimal,
     min_trade_amount: Decimal,
     execution_reference_price: Decimal,
+    fee_rate: Decimal = Decimal("0"),
+    slippage_bps: Decimal = Decimal("0"),
     fill_id_factory: Callable[[], str],
     clock: Clock,
     repository: PaperRepository | None = None,
@@ -61,6 +68,8 @@ def run_paper_cycle(
         quantity_step=quantity_step,
         min_trade_amount=min_trade_amount,
         execution_reference_price=execution_reference_price,
+        fee_rate=fee_rate,
+        slippage_bps=slippage_bps,
     )
     cycle_time = require_utc(clock.now())
     signal = strategy.generate_signal(bars)
@@ -100,21 +109,23 @@ def run_paper_cycle(
     if intent is None:
         log_event(_LOGGER, "paper.no_order_required", strategy_id=signal.strategy_id)
         return PaperCycleResult(signal, None, None, None, None)
-    if (
-        intent.side is OrderSide.BUY
-        and intent.quantity * execution_reference_price < min_trade_amount
-    ):
-        log_event(_LOGGER, "paper.minimum_trade_blocked", strategy_id=signal.strategy_id)
-        return PaperCycleResult(signal, intent, None, None, None)
+    expected_fill_price = apply_slippage(
+        execution_reference_price,
+        intent.side,
+        slippage_bps,
+    )
+    risk_position_value = current_quantity * expected_fill_price
+    risk_portfolio_value = broker.cash + risk_position_value
 
     decision = risk_manager.evaluate(
         intent,
         RiskContext(
-            portfolio_value=portfolio_value,
+            portfolio_value=risk_portfolio_value,
             available_cash=broker.cash,
-            current_position_value=current_position_value,
-            current_price=execution_reference_price,
+            current_position_value=risk_position_value,
+            current_price=expected_fill_price,
             quantity_step=quantity_step,
+            fee_rate=fee_rate,
         ),
         risk_limits,
     )
@@ -132,6 +143,13 @@ def run_paper_cycle(
         strategy_id=signal.strategy_id,
         risk_status=decision.status.value,
     )
+    if (
+        decision.approved_intent.side is OrderSide.BUY
+        and decision.approved_intent.quantity * expected_fill_price
+        < min_trade_amount
+    ):
+        log_event(_LOGGER, "paper.minimum_trade_blocked", strategy_id=signal.strategy_id)
+        return PaperCycleResult(signal, intent, decision, None, None)
 
     decision_scope = PaperCursorScope(
         instrument=instrument,
@@ -192,6 +210,8 @@ def _validate_inputs(
     quantity_step: Decimal,
     min_trade_amount: Decimal,
     execution_reference_price: Decimal,
+    fee_rate: Decimal,
+    slippage_bps: Decimal,
 ) -> None:
     if not bars:
         raise ValueError("paper cycle requires at least one closed bar")
@@ -209,6 +229,8 @@ def _validate_inputs(
         execution_reference_price,
         name="execution_reference_price",
     )
+    validate_fee_rate(fee_rate)
+    validate_slippage_bps(slippage_bps)
     if not Decimal("0") <= target_weight <= Decimal("1"):
         raise ValueError("target_weight must be between 0 and 1")
     if quantity_step <= 0:

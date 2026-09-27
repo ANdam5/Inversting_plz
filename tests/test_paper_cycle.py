@@ -83,6 +83,9 @@ def cycle(
     target_weight: Decimal = Decimal("0.5"),
     reference_price: Decimal = Decimal("100"),
     fill_id: str = "fill-1",
+    min_trade_amount: Decimal = Decimal("0"),
+    fee_rate: Decimal = Decimal("0"),
+    slippage_bps: Decimal = Decimal("0"),
 ) -> PaperCycleResult:
     return run_paper_cycle(
         make_bars(),
@@ -92,8 +95,10 @@ def cycle(
         risk_limits or limits(),
         target_weight=target_weight,
         quantity_step=Decimal("1"),
-        min_trade_amount=Decimal("0"),
+        min_trade_amount=min_trade_amount,
         execution_reference_price=reference_price,
+        fee_rate=fee_rate,
+        slippage_bps=slippage_bps,
         fill_id_factory=lambda: fill_id,
         clock=FixedClock(CYCLE_TIME),
     )
@@ -211,21 +216,90 @@ def test_risk_adjusted_quantity_is_submitted_and_filled() -> None:
     assert result.fill.quantity == Decimal("3")
 
 
-def test_broker_account_rejection_is_a_normal_cycle_result() -> None:
+def test_fee_aware_risk_preserves_minimum_cash_reserve_after_fill() -> None:
     broker = make_broker(fee_rate=Decimal("0.10"))
 
     result = cycle(
         broker,
         SignalType.BULLISH_CROSSOVER,
         target_weight=Decimal("1"),
+        risk_limits=limits(min_cash_reserve=Decimal("100")),
+        fee_rate=Decimal("0.10"),
     )
 
     assert result.risk_decision is not None
-    assert result.risk_decision.status is RiskStatus.APPROVED
+    assert result.risk_decision.status is RiskStatus.ADJUSTED
+    assert result.risk_decision.approved_intent is not None
+    assert result.risk_decision.approved_intent.quantity == Decimal("8")
     assert result.order is not None
-    assert result.order.status is OrderStatus.REJECTED
+    assert result.order.status is OrderStatus.FILLED
+    assert result.fill is not None
+    assert broker.cash == Decimal("120.00")
+    assert broker.cash >= Decimal("100")
+    assert broker.position_quantity(INSTRUMENT) == Decimal("8")
+
+
+def test_slippage_adjusted_risk_keeps_fill_notional_within_max_order_amount() -> None:
+    broker = make_broker(slippage_bps=Decimal("100"))
+
+    result = cycle(
+        broker,
+        SignalType.BULLISH_CROSSOVER,
+        target_weight=Decimal("1"),
+        risk_limits=limits(max_order_amount=Decimal("500")),
+        slippage_bps=Decimal("100"),
+    )
+
+    assert result.order_intent is not None
+    assert result.order_intent.quantity == Decimal("10")
+    assert result.risk_decision is not None
+    assert result.risk_decision.status is RiskStatus.ADJUSTED
+    assert result.order is not None
+    assert result.order.quantity == Decimal("4")
+    assert result.fill is not None
+    assert result.fill.fill_price == Decimal("101.00")
+    assert result.fill.quantity * result.fill.fill_price <= Decimal("500")
+
+
+def test_minimum_trade_amount_is_checked_after_risk_adjustment() -> None:
+    broker = make_broker()
+
+    result = cycle(
+        broker,
+        SignalType.BULLISH_CROSSOVER,
+        target_weight=Decimal("1"),
+        risk_limits=limits(max_order_amount=Decimal("300")),
+        min_trade_amount=Decimal("400"),
+    )
+
+    assert result.order_intent is not None
+    assert result.order_intent.quantity == Decimal("10")
+    assert result.risk_decision is not None
+    assert result.risk_decision.status is RiskStatus.ADJUSTED
+    assert result.risk_decision.approved_intent is not None
+    assert result.risk_decision.approved_intent.quantity == Decimal("3")
+    assert result.order is None
     assert result.fill is None
-    assert broker.cash == Decimal("1000")
+    assert broker.list_open_orders() == ()
+    assert broker.list_fills() == ()
+
+
+def test_small_bearish_liquidation_ignores_minimum_buy_trade_amount() -> None:
+    broker = make_broker()
+    seed_position(broker, Decimal("1"))
+
+    result = cycle(
+        broker,
+        SignalType.BEARISH_CROSSOVER,
+        reference_price=Decimal("100"),
+        fill_id="fill-2",
+        min_trade_amount=Decimal("500"),
+    )
+
+    assert result.order_intent is not None
+    assert result.order_intent.side is OrderSide.SELL
+    assert result.fill is not None
+    assert result.fill.quantity == Decimal("1")
     assert broker.position_quantity(INSTRUMENT) == Decimal("0")
 
 
@@ -251,12 +325,37 @@ def test_paper_broker_applies_fee_and_slippage_once() -> None:
         slippage_bps=Decimal("10"),
     )
 
-    result = cycle(broker, SignalType.BULLISH_CROSSOVER)
+    result = cycle(
+        broker,
+        SignalType.BULLISH_CROSSOVER,
+        fee_rate=Decimal("0.001"),
+        slippage_bps=Decimal("10"),
+    )
 
     assert result.fill is not None
     assert result.fill.fill_price == Decimal("100.100")
     assert result.fill.fee_amount == Decimal("0.500500")
     assert broker.cash == Decimal("498.999500")
+
+
+def test_explicit_zero_fee_and_slippage_match_existing_paper_behavior() -> None:
+    default_broker = make_broker()
+    explicit_zero_broker = make_broker(
+        fee_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+    )
+
+    default_result = cycle(default_broker, SignalType.BULLISH_CROSSOVER)
+    explicit_zero_result = cycle(
+        explicit_zero_broker,
+        SignalType.BULLISH_CROSSOVER,
+        fee_rate=Decimal("0"),
+        slippage_bps=Decimal("0"),
+    )
+
+    assert explicit_zero_result == default_result
+    assert explicit_zero_broker.cash == default_broker.cash
+    assert explicit_zero_broker.list_positions() == default_broker.list_positions()
 
 
 def test_same_deterministic_inputs_produce_identical_cycle_results() -> None:

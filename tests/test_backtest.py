@@ -290,6 +290,27 @@ def test_small_buy_is_skipped_and_zero_threshold_preserves_it() -> None:
     assert filtered.adjusted_count == 2
 
 
+def test_buy_below_minimum_after_risk_adjustment_creates_no_fill() -> None:
+    result = run_backtest(
+        bars_from_closes(["3", "2", "1", "4", "5"], opens={4: "100"}),
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            target_weight=Decimal("1"),
+            min_trade_amount=Decimal("400"),
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("300"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("0"),
+            ),
+        ),
+    )
+
+    assert result.intent_count == 1
+    assert result.adjusted_count == 1
+    assert result.fill_count == 0
+    assert result.final_cash == Decimal("1000")
+
+
 def test_small_bearish_liquidation_sell_is_allowed() -> None:
     result = run_backtest(
         bars_from_closes(
@@ -421,6 +442,36 @@ def test_fee_aware_affordability_rounds_down_and_preserves_cash_reserve() -> Non
     assert result.final_cash >= Decimal("100")
     assert result.final_cash >= Decimal("0")
     assert result.fill_count == 1
+
+
+def test_max_order_batches_continue_until_cash_reserve_becomes_binding() -> None:
+    bars = bars_from_closes(
+        ["3", "2", "1", "4", "5", "6", "7"],
+        opens={4: "100", 5: "100", 6: "100"},
+    )
+    result = run_backtest(
+        bars,
+        MovingAverageCrossoverStrategy(fast_window=2, slow_window=3),
+        config(
+            target_weight=Decimal("1"),
+            fee_rate=Decimal("0"),
+            risk_limits=RiskLimits(
+                max_order_amount=Decimal("300"),
+                max_instrument_weight=Decimal("1"),
+                min_cash_reserve=Decimal("100"),
+            ),
+        ),
+    )
+
+    assert [fill.quantity for fill in result.fills] == [
+        Decimal("3"),
+        Decimal("3"),
+        Decimal("3"),
+    ]
+    assert result.fill_count == 3
+    assert result.adjusted_count == 3
+    assert result.final_position_quantity == Decimal("9")
+    assert result.final_cash == Decimal("100")
 
 
 def test_zero_cost_settings_match_legacy_defaults() -> None:

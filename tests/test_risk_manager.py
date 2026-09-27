@@ -100,6 +100,21 @@ def test_minimum_cash_reserve_adjusts_quantity() -> None:
     assert decision.approved_intent.quantity == Decimal("0.00300000")
 
 
+def test_minimum_cash_reserve_accounts_for_buy_fee() -> None:
+    decision = evaluate(
+        order_intent=intent(quantity="0.01"),
+        risk_context=context(
+            available_cash=Decimal("1100000"),
+            fee_rate=Decimal("0.10"),
+        ),
+        risk_limits=limits(min_cash_reserve=Decimal("100000")),
+    )
+
+    assert decision.status is RiskStatus.ADJUSTED
+    assert decision.approved_intent is not None
+    assert decision.approved_intent.quantity == Decimal("0.00909090")
+
+
 def test_most_conservative_of_multiple_limits_wins() -> None:
     decision = evaluate(
         risk_context=context(

@@ -31,17 +31,21 @@ class BasicRiskManager:
         original_amount = intent.quantity * context.current_price
         max_position_value = context.portfolio_value * limits.max_instrument_weight
         exposure_headroom = max_position_value - context.current_position_value
-        cash_headroom = context.available_cash - limits.min_cash_reserve
+        spendable_cash = context.available_cash - limits.min_cash_reserve
 
         if exposure_headroom <= 0:
             return _rejected(intent, "instrument exposure is already at or above its limit")
-        if cash_headroom <= 0:
+        if spendable_cash <= 0:
             return _rejected(intent, "minimum cash reserve leaves no amount available to buy")
+
+        cash_notional_headroom = spendable_cash / (
+            Decimal("1") + context.fee_rate
+        )
 
         allowed_amounts = {
             "maximum order amount": limits.max_order_amount,
             "maximum instrument weight": exposure_headroom,
-            "minimum cash reserve": cash_headroom,
+            "minimum cash reserve": cash_notional_headroom,
         }
         allowed_amount = min(original_amount, *allowed_amounts.values())
         allowed_quantity = round_down_to_step(

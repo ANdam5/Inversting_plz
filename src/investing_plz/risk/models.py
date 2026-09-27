@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from investing_plz.domain import OrderIntent
 from investing_plz.domain.decimal import require_decimal
+from investing_plz.execution import validate_fee_rate
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +14,7 @@ class RiskContext:
     current_position_value: Decimal
     current_price: Decimal
     quantity_step: Decimal
+    fee_rate: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         for name in (
@@ -33,6 +35,7 @@ class RiskContext:
             raise ValueError("current_price must be greater than zero")
         if self.quantity_step <= 0:
             raise ValueError("quantity_step must be greater than zero")
+        validate_fee_rate(self.fee_rate)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,4 +71,3 @@ class RiskDecision:
     original_intent: OrderIntent
     approved_intent: OrderIntent | None
     reason: str
-
