@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "investing-plz"
 version = "0.1.0"
 requires-python = ">=3.11"
+dependencies = ["PyJWT>=2.8,<3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
