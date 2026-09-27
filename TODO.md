@@ -150,7 +150,7 @@
 - [ ] Paper/Live 비용 정책의 교체 필요성이 확인되면 slippage model port를 추출한다.
 - [x] Upbit 인증 서명 생성을 공식 fixture로 테스트한다.
 - [x] Upbit 잔고 응답을 표준 balance로 변환하고 fixture로 테스트한다.
-- [ ] Upbit 주문 응답을 표준 Order로 변환하고 fixture로 테스트한다.
+- [x] Upbit 주문 응답을 snapshot으로 파싱하고 정확한 원 수량이 있는 주문만 표준 `Order`로 변환하며 시장가 매수는 명시적으로 거부한다.
 - [ ] Upbit fill/status polling을 구현하고 부분 체결을 테스트한다.
 - [ ] Upbit tick size 반올림을 구현하고 가격 구간 경계를 테스트한다.
 - [ ] Upbit 최소 주문 금액 검사를 구현하고 경계값을 테스트한다.
