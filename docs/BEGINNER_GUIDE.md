@@ -17,7 +17,7 @@ Upbit
 
 여기서 **일봉**은 하루 동안의 시가, 고가, 저가, 종가, 거래량을 한 묶음으로 표현한 데이터다.
 
-현재는 수집한 데이터로 20일·60일 이동평균 교차 Signal을 계산하고, 과거 closed Bar 위에서 최소 Backtest를 실행할 수 있다. 하지만 자동매매 프로그램 전체는 아니며 실제 거래소 주문은 하지 않는다.
+현재는 수집한 데이터로 이동평균 교차 Signal과 Backtest를 계산할 수 있고, Upbit 공개 데이터로 지속 가능한 Paper Trading도 실행할 수 있다. Paper Trading은 가상 현금과 수량만 바꾸며 실제 거래소 주문은 하지 않는다.
 
 ## 2. 현재 할 수 있는 것 / 아직 할 수 없는 것
 
@@ -45,19 +45,22 @@ Upbit
 - Passive 10%와 BTC 100% Buy & Hold benchmark 계산하기
 - Fill을 완료된 position lifecycle인 ClosedTrade로 묶고 Trade Metrics 계산하기
 - Backtest 실행조건 metadata와 deterministic fingerprint 만들기
+- Order/OrderStatus와 Broker contract로 제출 주문 lifecycle 관리하기
+- PaperBroker에서 public ticker 가격, fee와 slippage로 가상 체결하기
+- polling scheduler로 새로운 closed daily Bar만 처리하기
+- Order, Fill, decision, cursor와 session config를 SQLite에 저장하기
+- restart 시 account를 복구하고 reconciliation과 safety 검사를 거치기
+- durable decision idempotency와 pending-order 중복 차단하기
+- 구조화 로그와 correlation ID로 한 cycle 추적하기
+- `paper` CLI를 `--once` 또는 continuous mode로 실행하기
 
 ### 현재 불가능한 것
 
-- 실제 Order와 OrderStatus lifecycle 관리
-- Broker 또는 PaperBroker를 통한 주문 제출
-- Clock abstraction을 사용한 실시간 polling
-- 주문·체결 영속화와 재시작 복구
-- 저장 상태와 Broker 상태 reconciliation
-- 주문 idempotency와 중복 미체결 주문 차단
-- 운영 kill switch
-- Paper Trading
-- Live Trading과 실제 투자
-- 실제 계좌 Portfolio 관리
+- Upbit authenticated 주문과 실제 투자
+- 실제 거래소 잔고·주문 상태 및 partial fill 처리
+- 외부 거래소를 source of truth로 삼는 Live reconciliation
+- 여러 Strategy나 account가 하나의 cash pool을 공유하는 portfolio runtime
+- 실행 중 원격으로 조작하는 kill switch
 - AI 또는 뉴스 분석
 
 ## 3. 프로젝트 폴더 구조
@@ -79,7 +82,9 @@ Inversting_plz/
 ├─ src/investing_plz/
 │  ├─ __init__.py                  # investing_plz를 Python 패키지로 표시
 │  ├─ __main__.py                  # python -m investing_plz 실행 시작점
-│  ├─ cli.py                       # collect/summary/signal/backtest 명령 처리
+│  ├─ cli.py                       # collect/summary/signal/backtest/paper 명령 처리
+│  ├─ runtime_identity.py          # restart-safe Paper Order/Fill/correlation ID
+│  ├─ structured_logging.py        # JSON structured logging
 │  ├─ indicators/
 │  │  ├─ __init__.py              # indicator 함수 공개
 │  │  └─ moving_average.py        # Decimal 종가의 Simple Moving Average
@@ -89,7 +94,21 @@ Inversting_plz/
 │  ├─ application/
 │  │  ├─ __init__.py              # application 패키지 표시
 │  │  ├─ collect.py               # 데이터 수집 전체 순서를 조정
-│  │  └─ position_sizing.py       # 목표 비중을 OrderIntent 수량으로 변환
+│  │  ├─ position_sizing.py       # 목표 비중을 OrderIntent 수량으로 변환
+│  │  ├─ paper_cycle.py           # 한 번의 Strategy→Paper execution
+│  │  ├─ paper_scheduler.py       # poll cadence와 새 closed-Bar gate
+│  │  ├─ paper_recovery.py        # durable state에서 runtime 복구
+│  │  ├─ paper_reconciliation.py  # DB와 PaperBroker 일치 검사
+│  │  ├─ paper_safety.py          # stale data와 kill switch 검사
+│  │  └─ paper_runtime.py         # production Paper 조립과 loop
+│  ├─ broker/
+│  │  ├─ protocol.py              # provider-neutral Broker 계약
+│  │  ├─ models.py                # ExecutionFill
+│  │  ├─ memory.py                # Broker contract용 fake
+│  │  ├─ paper_account.py         # Fill 기반 account projection
+│  │  └─ paper.py                 # 가상 cash/position PaperBroker
+│  ├─ clock/                      # Clock protocol과 fixed/system 구현
+│  ├─ execution/                  # 공통 fee/slippage Decimal 계산
 │  ├─ backtest/
 │  │  ├─ __init__.py              # Backtest 공개 이름 모음
 │  │  ├─ models.py                # 설정, Fill, 가상 Portfolio, 결과 모델
@@ -106,6 +125,7 @@ Inversting_plz/
 │  │  ├─ bar.py                   # 공통 OHLCV Bar와 기본 불변조건
 │  │  ├─ decimal.py               # 금융 값의 Decimal 타입 검사
 │  │  ├─ order_intent.py          # 실제 주문 전의 BUY/SELL 주문 후보
+│  │  ├─ order.py                 # immutable Order와 OrderStatus
 │  │  └─ time.py                  # timezone-aware UTC 검사
 │  ├─ market_data/
 │  │  ├─ __init__.py              # market_data의 공개 이름 모음
@@ -127,7 +147,9 @@ Inversting_plz/
 │  │  └─ manager.py               # 세 가지 기본 BUY 위험 제한
 │  └─ storage/
 │     ├─ __init__.py              # storage 패키지와 SQLiteBarStore 공개
-│     └─ sqlite.py                # SQLite 생성·저장·조회·summary
+│     ├─ sqlite.py                # Bar SQLite 생성·저장·조회·summary
+│     ├─ paper.py                 # Paper repository 모델과 contract
+│     └─ paper_sqlite.py          # Paper config/Order/Fill/cursor 영속화
 └─ tests/
    ├─ fixtures/
    │  └─ upbit_day_candles.json   # 인터넷 없이 쓰는 Upbit 응답 예제
@@ -311,8 +333,8 @@ SQLite는 별도의 DB 서버를 설치하지 않고 파일 하나에 표 형태
 ### `data/krw_btc_5y.db`
 
 - 백테스트 준비를 위해 수집한 약 5년치 KRW-BTC historical dataset이다.
-- 현재 2021-04-05부터 2026-09-25까지 2,000개의 일봉이 있다.
-- 그중 완료된 일봉은 1,999개이며, 2026-09-25 일봉은 당시 진행 중이었다.
+- 2026-09-25 확인 당시 2021-04-05부터 2026-09-25까지 2,000개의 일봉이 있었다.
+- 같은 확인 당시 완료된 일봉은 1,999개였으며, 2026-09-25 일봉은 진행 중이었다.
 
 DB 파일은 Python source code가 아니라 **프로그램이 만든 데이터 산출물**이다. `.py` 파일은 “어떻게 동작할지”를 적은 코드이고, `.db` 파일은 그 코드가 실제로 수집해 저장한 결과다.
 
@@ -328,7 +350,7 @@ now >= bar.timestamp + 1 day
 
 예를 들어 2026-09-24 00:00 UTC 일봉은 2026-09-25 00:00 UTC부터 closed다.
 
-현재 진행 중인 Bar가 DB에 저장되는 것은 허용된다. 대신 `SQLiteBarStore.load_closed_bars()`에 명시적인 `now`를 넘기면 closed Bar만 돌려준다. 따라서 앞으로 전략이나 백테스트는 전체 DB가 아니라 이 완료 데이터 조회 결과를 사용하면 된다. 현재 백테스트 엔진 자체는 아직 없다.
+현재 진행 중인 Bar가 DB에 저장되는 것은 허용된다. 대신 `SQLiteBarStore.load_closed_bars()`에 명시적인 `now`를 넘기면 closed Bar만 돌려준다. Strategy와 Backtest는 전체 DB가 아니라 이 완료 데이터 조회 결과를 사용한다.
 
 ## 9. `summary` 명령
 
@@ -357,7 +379,7 @@ python -m investing_plz summary `
 | `duplicate_count` | 같은 timestamp가 추가로 존재하는 횟수. 정상은 0 |
 | `gap_count` | 연속된 일봉 사이에서 빠진 날짜 수. 정상은 0 |
 
-현재 `krw_btc_5y.db`의 확인 결과는 전체 2,000개, closed 1,999개, duplicate 0개, gap 0개다.
+2026-09-25 확인 당시 `krw_btc_5y.db`의 snapshot은 전체 2,000개, closed 1,999개, duplicate 0개, gap 0개였다.
 
 ## 9A. Moving Average, Strategy, Signal
 
@@ -440,7 +462,7 @@ Instrument + strategy_id + parameters
 | Indicator / MA | Bar의 종가로 계산한 값 | 구현됨 |
 | Strategy | Indicator를 보고 판단하는 규칙 | MA crossover만 구현됨 |
 | Signal | Strategy가 만든 판단 결과 | 구현됨, 주문 아님 |
-| Order | 거래소에 보내는 실제 거래 요청 | 아직 구현되지 않음 |
+| Order | Broker에 제출되어 ID와 상태를 가진 주문 | 구현됨, Paper에서는 가상 주문 |
 
 ### Signal과 OrderIntent
 
@@ -455,10 +477,10 @@ Risk Manager
   → 주문 후보가 안전한지 검사하고 승인·축소·거부
 
 Order
-  → Broker로 제출되는 실제 주문 (아직 구현되지 않음)
+  → Broker에 제출되어 PENDING/terminal 상태를 가진 주문
 ```
 
-`OrderIntent`에는 Instrument, UTC timestamp, strategy ID, BUY/SELL 방향, quantity가 있다. Broker 주문 ID, 체결 상태, 수수료, 가격 같은 실행 정보는 아직 없다. 따라서 OrderIntent가 생겨도 거래소에는 아무 요청도 전달되지 않는다.
+`OrderIntent`에는 Instrument, UTC timestamp, strategy ID, BUY/SELL 방향, quantity가 있다. Risk를 통과한 Intent를 PaperBroker에 제출하면 ID와 상태를 가진 `Order`가 된다. PaperBroker의 `ExecutionFill`은 체결 가격과 fee를 기록하지만 Upbit 인증 주문은 호출하지 않는다.
 
 ### Position sizing
 
@@ -509,12 +531,12 @@ Risk Manager
   ↓
 APPROVED / ADJUSTED / REJECTED
   ↓
-Order         (아직 미구현)
+Order(PENDING) → ExecutionFill → Order(FILLED)
 ```
 
 ### Basic Risk Manager
 
-Risk Manager는 OrderIntent를 실제 주문으로 보내기 전에 운영자가 정한 안전 한도를 검사한다. 현재는 실제 Order가 없으므로 검사 결과까지만 만들며 Upbit 주문은 발생하지 않는다.
+Risk Manager는 OrderIntent를 Broker에 제출하기 전에 운영자가 정한 안전 한도를 검사한다. Paper에서는 승인된 Intent만 가상 Order가 되며 Upbit 실제 주문은 발생하지 않는다.
 
 ```text
 OrderIntent: "BUY 0.01 BTC를 원함"
@@ -526,7 +548,7 @@ BasicRiskManager
   ↓
 APPROVED / ADJUSTED / REJECTED
   ↓
-Order  (아직 미구현)
+Paper Order 또는 향후 Live Order
 ```
 
 - **APPROVED**: 원래 Intent를 그대로 허용한다.
@@ -535,7 +557,7 @@ Order  (아직 미구현)
 
 예를 들어 `BUY 0.01 BTC`가 100만원이지만 최대 주문 금액이 50만원이면 `BUY 0.005 BTC`로 ADJUSTED된다. 여러 한도가 동시에 적용되면 허용 금액이 가장 작은 제한을 사용하므로 규칙 검사 순서에 따라 결과가 바뀌지 않는다.
 
-Risk 계산에는 portfolio value, available cash, 현재 종목 가치, 현재 가격, 수량 단위를 직접 전달한다. 아직 실제 계좌 Portfolio나 잔고 조회는 없다. SELL은 long 포지션을 줄이는 방향이므로 BUY용 현금·노출 한도로 막지 않는다.
+Risk 계산에는 portfolio value, available cash, 현재 종목 가치, 현재 가격, 수량 단위를 전달한다. Paper cycle은 PaperBroker의 가상 cash와 position을 사용한다. SELL은 long 포지션을 줄이는 방향이므로 BUY용 현금·노출 한도로 막지 않는다.
 
 ### 금융 값에 Decimal을 사용하는 이유
 
@@ -778,6 +800,117 @@ python -m investing_plz backtest `
 
 `--show-fills`는 Backtest 계산을 바꾸지 않고, 이미 계산된 Fill의 시간, BUY/SELL 방향, 수량, 체결 가격, 거래대금과 fee를 요약 아래에 추가로 보여 주는 선택 옵션이다.
 
+## 9C. Paper Trading
+
+Paper Trading은 현재 공개 시장 데이터를 읽어 주문 결정을 실행하지만 실제 Upbit 계좌에는 주문하지 않는 simulation이다.
+
+```text
+Upbit public candles
+  → 현재 진행 중인 일봉 제외
+  → 최신 closed Bar
+  → Strategy → Signal
+  → position sizing → Risk
+  → durable decision 중복 검사
+  → Paper Order(PENDING)
+  → Upbit public ticker의 current reference price
+  → fee/slippage가 반영된 simulated ExecutionFill
+  → PaperBroker cash/position 갱신
+  → SQLite Order/Fill/cursor 저장
+```
+
+Paper 실행 가격은 마지막 closed Bar의 종가를 재사용하지 않고 별도의 Upbit 공개 ticker에서 읽는다. Candle과 ticker의 금융 숫자는 JSON에서 곧바로 `Decimal`로 읽으며 API key나 secret은 필요하지 않다.
+
+### Backtest와 Paper의 차이
+
+| 실행 | 데이터와 시간 | 체결 | 상태 |
+|---|---|---|---|
+| Backtest | 저장된 historical closed Bars replay | Signal 다음 Bar open | 실행이 끝나면 결과·metrics 반환 |
+| Paper | 현재 Upbit public data polling | 현재 public ticker를 reference로 simulated Fill | SQLite에 저장하고 restart 가능 |
+
+Backtest의 next-Bar-open 규칙, Equity Curve, CAGR, MDD와 benchmark를 Paper runtime에 섞지 않는다. Paper는 실제 Upbit authenticated order를 절대 호출하지 않는다.
+
+### Restart 흐름
+
+```text
+Paper SQLite DB
+  → durable session config 검증
+  → Order / Fill 복구
+  → persisted Fill로 cash / position 재구성
+  → cursor와 decision mapping 복구
+  → reconciliation
+  → kill switch / stale-data safety
+  → polling scheduler 시작
+```
+
+`PENDING` Order처럼 crash 시점을 DB만으로 확정할 수 없는 상태는 자동 체결·취소하지 않는다. Reconciliation이 unsafe로 판정하고 신규 trading을 막는다. Live exchange 상태와 비교하는 reconciliation은 M5 범위다.
+
+### 하나의 DB는 하나의 Paper session
+
+M4에서는 다음 규칙을 사용한다.
+
+```text
+1 SQLite Paper DB
+= 1 Paper account
+= 1 PaperSessionConfig
+= 1 instrument + strategy_id + timeframe
+```
+
+다른 종목, Strategy 또는 timeframe을 시작하려면 별도 `--paper-database` 파일을 사용한다. 현재는 multi-account나 여러 Strategy가 cash를 공유하는 portfolio runtime이 아니다.
+
+`strategy_id`는 화면에 보여 주는 이름만이 아니라 durable strategy semantics identity다. Strategy 계산 의미를 바꾸면 새로운 `strategy_id` 또는 새로운 Paper DB를 사용해야 한다.
+
+### Safety와 종료
+
+- Startup에서 config validation, recovery와 reconciliation을 반드시 거친다.
+- 최신 daily closed Bar가 다음 예상 completion보다 지나치게 늦으면 stale로 차단한다.
+- trading은 기본 disabled다. `--enable-trading`이 있어야 가상 Order/Fill을 만든다.
+- `--enable-trading`이 없어도 public closed Bars는 조회하지만 price 조회, Strategy cycle, Order/Fill과 cursor 갱신은 하지 않는다.
+- 현재 `ManualKillSwitch`는 CLI 실행 중 원격 조작하는 switch가 아니다. Continuous mode의 즉시 정지는 Ctrl+C다.
+- crash 후 ambiguous `PENDING`은 fail-closed하며 자동 해결하지 않는다.
+
+### 주문 없는 network smoke
+
+```powershell
+python -m investing_plz paper `
+  --venue upbit `
+  --symbol KRW-BTC `
+  --timeframe day `
+  --paper-database data\paper_krw_btc_smoke.db `
+  --once
+```
+
+이 명령은 Paper DB와 session config를 생성할 수 있지만, `--enable-trading`이 없으므로 Order, Fill, cursor는 만들지 않는다. Public closed-Bar 조회와 startup 구성 확인을 위한 주문 없는 smoke다.
+
+### 한 번의 Paper simulation
+
+```powershell
+python -m investing_plz paper `
+  --venue upbit `
+  --symbol KRW-BTC `
+  --timeframe day `
+  --strategy-id moving_average_crossover `
+  --fast 20 `
+  --slow 60 `
+  --initial-cash 10000000 `
+  --target-weight 0.10 `
+  --quantity-step 0.00000001 `
+  --min-trade-amount 10000 `
+  --max-order-amount 500000 `
+  --max-instrument-weight 0.20 `
+  --min-cash-reserve 1000000 `
+  --fee-rate 0.0005 `
+  --slippage-bps 5 `
+  --poll-interval-seconds 60 `
+  --max-data-delay-seconds 300 `
+  --paper-database data\paper_krw_btc_sim.db `
+  --enable-trading `
+  --once
+```
+
+이 명령은 simulated trading만 허용한다. 환경에 Upbit API key가 있더라도 Paper command는 이를 읽거나 authenticated order endpoint를 호출하지 않는다. 같은 DB를 다시 열 때는 모든 durable config가 정확히 같아야 한다.
+
+Fee와 slippage는 Backtest와 같은 Decimal 함수를 사용한다. 현재 필요한 정책이 zero/fixed fee와 zero/fixed adverse slippage뿐이므로 model port는 만들지 않았고, 실제 Upbit Live 정책에서 교체 필요성이 생길 때 M5에서 검토한다.
+
 ## 10. pytest란 무엇인가
 
 다음 명령은 시장 데이터를 수집하는 명령이 아니다.
@@ -829,6 +962,15 @@ python -m pytest -q
 | `test_trade_metrics.py` | Win Rate, Profit Factor와 평균 Trade 손익·수익률 |
 | `test_backtest_metadata.py` | 실행조건 metadata validation과 serialization round-trip |
 | `test_backtest_fingerprint.py` | Decimal canonical fingerprint와 반복 실행 재현성 |
+| `test_order.py`, `test_broker_contract.py` | Order 상태 전이와 Broker 주문 계약 |
+| `test_paper_broker_*.py` | simulated Fill, cash/position, fee/slippage와 account safety |
+| `test_paper_cycle.py`, `test_paper_scheduler.py` | 단일 decision cycle, polling cadence와 new-Bar gate |
+| `test_sqlite_paper_repository.py` | config·decision·Order·Fill·cursor 영속화와 transaction |
+| `test_paper_recovery.py`, `test_paper_reconciliation.py` | restart account 복구와 fail-closed readiness |
+| `test_paper_safety.py` | daily freshness와 kill switch 차단 |
+| `test_paper_session_config.py` | one-DB-one-session config invariant |
+| `test_runtime_observability.py` | restart-safe ID와 structured correlation logging |
+| `test_paper_runtime.py`, `test_paper_cli.py` | fake provider 기반 production 조립과 restart E2E |
 | `test_signal_cli.py` | 진행 중 Bar 제외와 signal CLI 전체 흐름 |
 | `test_sqlite_bar_store.py` | SQLite 저장, 값 round-trip, 중복 방지, 최신 timestamp 조회 |
 | `test_collect.py` | 수집 use case의 중복 없는 재실행과 중단 후 이어받기 |
@@ -1029,6 +1171,19 @@ tests/
 └─ integration 검사   → 실제 Upbit API 연결, 명시적으로 켤 때만 실행
 ```
 
+### Paper runtime 흐름
+
+```text
+Upbit 공개 closed Bars + public ticker
+  → scheduler
+  → Strategy / sizing / Risk
+  → durable decision gate
+  → PaperBroker simulated Order / Fill
+  → cash / position
+  → Paper SQLite persistence
+  → restart recovery / reconciliation / safety
+```
+
 ## 16. 현재 개발 단계
 
 | 단계 | 내용 | 상태 |
@@ -1047,13 +1202,14 @@ tests/
 | M3-B3 | Strategy parameter resolution | 완료 |
 | M3-B4 | 평균단가·손익·ClosedTrade·Trade Metrics | 완료 |
 | M3-C | Backtest metadata와 deterministic fingerprint | 완료 |
-| M4 | Paper Trading: Order/Broker/Clock/영속화·복구 | **아직 구현되지 않음** |
+| M4 | Paper Trading: Order/Broker/Clock/영속화·복구·safety·CLI | 완료 |
+| M5 | Upbit authenticated Live Trading | 다음 단계 |
 
-현재 저장소에는 Signal, Position sizing, OrderIntent, 기본 Risk 판단, 실행비용·회계·성과분석·재현성 기록을 포함한 단일 종목 Backtest가 있다. 실제 Order/OrderStatus, Broker, PaperBroker, Clock, 주문 영속화·복구와 실제 계좌 Portfolio는 아직 없다.
+현재 저장소에는 결정론적 Backtest와 단일 Instrument Paper runtime이 모두 있다. Paper runtime은 Order/Fill과 가상 account를 SQLite에 저장하고 재시작할 수 있지만, 실제 Upbit 인증 주문과 실제 계좌는 아직 지원하지 않는다.
 
 ## 17. 초보자가 지금 이해하면 충분한 것
 
-처음부터 모든 Python 문법과 파일 내부를 이해할 필요는 없다. 현재는 다음 다섯 가지를 이해하면 충분하다.
+처음부터 모든 Python 문법과 파일 내부를 이해할 필요는 없다. 현재는 다음 여섯 가지를 이해하면 충분하다.
 
 1. **어디서 실행하는가**  
    프로젝트 루트에서 가상환경을 활성화하고 `python -m investing_plz ...`를 실행한다.
@@ -1067,5 +1223,8 @@ tests/
 4. **어디에 저장되는가**  
    실제 약 5년 데이터는 `data/krw_btc_5y.db`의 `bars` 테이블에 저장된다.
 
-5. **테스트가 무엇을 검증하는가**  
-   `pytest`는 데이터 변환, 검증, 저장, closed 판정, summary가 예상대로 동작하는지 자동 검사한다. 실제 시장 데이터를 수집하는 명령과는 다르다.
+5. **Paper와 Live가 어떻게 다른가**
+   Paper는 공개 데이터와 simulated Fill만 사용한다. `--enable-trading`도 실제 주문 허용이 아니라 가상 execution 허용이다.
+
+6. **테스트가 무엇을 검증하는가**
+   `pytest`는 데이터 변환, Backtest, Paper persistence/restart/safety가 예상대로 동작하는지 자동 검사한다. 실제 시장 데이터를 수집하거나 거래하는 명령과는 다르다.

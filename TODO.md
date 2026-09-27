@@ -141,6 +141,8 @@
 - [x] kill switch를 구현하고 활성화 중 주문 미제출을 테스트한다.
 - [x] durable Paper session configuration을 저장하고 restart 설정 불일치를 차단한다.
 - [x] paper trading CLI를 추가하고 fake market feed로 end-to-end 테스트한다.
+- [x] Upbit 금융 JSON의 Decimal 정밀도와 실패 poll cadence를 최종 회귀 테스트한다.
+- [x] Paper DB를 단일 account/session으로 제한하고 foreign scope 상태를 fail-closed한다.
 
 ## M5 — Upbit Live
 

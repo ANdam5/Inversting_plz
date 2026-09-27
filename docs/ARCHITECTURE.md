@@ -1,96 +1,121 @@
 # Architecture
 
-이 문서는 현재 존재하는 구현과 앞으로 만들 목표 구조를 구분한다. 현재 코드의 정확한 진행 상태는 `TODO.md`가 기준이다.
+이 문서는 현재 구현과 앞으로의 방향을 구분한다. 세부 완료 상태는 `TODO.md`가 기준이다.
 
 ## A. Current implementation
 
-현재 시스템은 하나의 Python 프로세스 안에서 동작하는 모듈형 모놀리스다. 구현된 핵심 흐름은 다음과 같다.
+시스템은 하나의 Python 프로세스에서 동작하는 모듈형 모놀리스다. 도메인과 Strategy는 Upbit, SQLite, 자격 증명에 의존하지 않고 실행 모드별 application과 adapter가 조립한다.
+
+### 공통 판단 흐름
 
 ```text
-Upbit public API
-  → UpbitMarketDataProvider
-  → normalized Bar
-  → validation
-  → SQLiteBarStore
-
-Historical closed Bars
+closed Bars
   → MovingAverageCrossoverStrategy
   → Signal
-  → desired target state
-  → next Bar open
+  → desired target
   → position sizing
   → OrderIntent
   → BasicRiskManager
-  → deterministic simulated Fill
-  → BacktestPortfolio
-  → equity, accounting, ClosedTrade, performance analysis
 ```
 
-### 현재 모델과 모듈
+`OrderIntent`는 Risk 검사 전후의 내부 주문 후보다. Risk를 통과해 Broker에 제출된 뒤에는 ID와 상태를 가진 immutable `Order`가 된다. 현재 `OrderStatus`는 `PENDING`, `FILLED`, `CANCELED`, `REJECTED`다.
 
-| 모듈 | 현재 책임 |
-|---|---|
-| `domain` | `Instrument(venue, symbol)`, `Bar`, `OrderIntent`, UTC·Decimal 규칙 |
-| `market_data` | provider 계약, candle 완료 판정, Bar 정렬·중복·gap 검증, dataset summary |
-| `adapters` | Upbit 공개 candle HTTP 요청과 응답→Bar 변환 |
-| `storage` | SQLite Bar 저장·조회·중복 방지·closed Bar 조회 |
-| `indicators` | Decimal 종가 기반 SMA 계산 |
-| `strategy` | closed Bar sequence를 받아 bullish/bearish/neutral `Signal` 생성, Strategy Profile과 parameter resolution |
-| `application` | 수집 조정과 목표 비중→OrderIntent position sizing |
-| `risk` | 주문금액·종목비중·현금 한도로 OrderIntent 승인·축소·거부 |
-| `backtest` | historical replay, next-bar execution, fee/slippage, 단일 종목 Portfolio 회계, 지표·benchmark·metadata·fingerprint |
+Strategy parameter 우선순위는 `default < instrument/profile < runtime override`다.
 
-현재 Strategy parameter 우선순위는 다음과 같다.
+### Backtest 경계
 
 ```text
-default < instrument/profile < runtime override
+Historical closed Bars
+  → Strategy / sizing / Risk
+  → next-Bar open deterministic Fill
+  → BacktestPortfolio
+  → equity, accounting, ClosedTrade, metrics, benchmark
 ```
 
-병합된 최종 fast/slow parameter는 기존 validation을 통과해야 한다. Strategy 내부에는 symbol별 분기가 없다.
+- Historical replay와 next-Bar-open 체결은 Backtest 전용이다.
+- runner가 Backtest `Fill`을 직접 만들며 Broker와 Clock을 사용하지 않는다.
+- fee와 deterministic adverse slippage는 provider-neutral Decimal 함수로 계산한다.
+- Portfolio는 cash, quantity, average cost, realized PnL을 유지하고 현재 가격으로 unrealized PnL을 계산한다.
+- `ClosedTrade`, Trade Metrics, Equity Curve, Total Return, CAGR, MDD와 benchmark를 제공한다.
+- `BacktestRunMetadata`와 canonical JSON SHA-256 fingerprint는 기록된 실행조건을 식별한다. DB 내용 hash나 Git commit 증명은 아니다.
 
-### 현재 Backtest의 경계
+### Paper runtime 경계
 
-- Strategy는 `closed Bars → Signal`만 담당한다.
-- bullish/bearish Signal은 runner의 desired target state를 바꾼다.
-- Position sizing과 `BasicRiskManager`는 기존 공통 구현을 재사용한다.
-- Signal은 같은 Bar가 아니라 다음 Bar open에서 실행되어 look-ahead를 막는다.
-- runner가 deterministic historical replay 과정에서 simulated `Fill`을 직접 생성한다.
-- 현재 Backtest에는 Broker 또는 Clock abstraction이 없다.
-- `BacktestPortfolio`는 cash, position quantity, average cost, realized PnL을 유지하며 현재 가격으로 unrealized PnL을 계산한다.
-- `ClosedTrade`는 flat→position→flat의 완료된 lifecycle이며 마지막 open position은 포함하지 않는다.
-- 실행 조건은 `BacktestRunMetadata`에 기록되고 canonical metadata JSON의 SHA-256으로 configuration fingerprint를 만든다.
+```text
+Upbit public daily candles
+  → closed-Bar filter
+  → polling scheduler / new-Bar gate
+  → Strategy / sizing / Risk
+  → durable decision check
+  → Broker.submit() → Order(PENDING)
+  → Upbit public current price
+  → PaperBroker simulated ExecutionFill
+  → cash / position
+  → SQLite Order / Fill / cursor persistence
+```
 
-Fingerprint의 `dataset_version`과 `code_version`은 호출자가 제공하는 label이다. 따라서 현재 fingerprint는 기록된 metadata 조건을 식별하지만 SQLite 내용 hash나 Git commit 증명은 아니다.
+| 영역 | 현재 책임 |
+|---|---|
+| `domain` | `Instrument`, `Bar`, `OrderIntent`, `Order`, `OrderStatus`, UTC·Decimal 규칙 |
+| `broker` | Broker contract, in-memory fake, `PaperBroker`, `ExecutionFill`, account projection |
+| `clock` | `Clock` protocol, `FixedClock`, UTC `SystemClock` |
+| `execution` | Backtest와 Paper가 공유하는 fee와 fixed adverse slippage 계산 |
+| `application.paper_cycle` | 한 closed-Bar decision의 Strategy→Risk→submit→execution 흐름 |
+| `application.paper_scheduler` | poll cadence, 최신 closed Bar gate, in-memory cursor |
+| `storage.paper*` | session config, Order, Fill, decision, cursor의 SQLite 영속화 |
+| `application.paper_recovery` | persisted Fill로 cash/position을 재구성하고 runtime 복구 |
+| `application.paper_reconciliation` | durable state와 Broker 비교, 불일치/PENDING 시 fail-closed |
+| `application.paper_safety` | daily closed-Bar freshness와 manual kill switch 검사 |
+| `runtime_identity`, `structured_logging` | restart-safe UUID ID, correlation context, JSON logging |
+| `application.paper_runtime`, `cli` | production 조립, `--once`/continuous loop, Ctrl+C 종료 |
+
+Paper는 Upbit 공개 candle과 ticker만 사용한다. 금융 JSON 숫자는 float를 거치지 않고 Decimal로 읽는다. 인증 API나 실제 거래소 주문은 호출하지 않는다.
+
+### Paper DB와 session invariant
+
+M4 baseline은 다음으로 제한한다.
+
+```text
+1 SQLite Paper DB
+= 1 Paper account
+= 1 PaperSessionConfig
+= 1 instrument + strategy_id + timeframe
+```
+
+Order/Fill과 PaperBroker cash pool은 DB 전체에 대한 하나의 account다. 다른 Instrument, Strategy 또는 timeframe을 운용하려면 별도 Paper DB를 사용한다. multi-strategy shared-account portfolio runtime은 지원하지 않는다.
+
+`strategy_id`는 표시 이름이 아니라 durable strategy semantics identity다. Strategy 계산 의미가 바뀌면 새로운 `strategy_id` 또는 새로운 Paper DB를 사용해야 한다. 별도 version framework는 없다.
+
+### Paper startup과 safety
+
+```text
+SQLite DB
+  → singleton config validation
+  → Order / Fill account recovery
+  → cursor recovery
+  → reconciliation
+  → kill switch + stale-data guard
+  → scheduler
+```
+
+- 기본값은 trading disabled이며 `--enable-trading`이 있어야 simulated execution을 허용한다.
+- unresolved `PENDING`, foreign session state, account mismatch는 자동 수정하지 않고 fail-closed한다.
+- daily Bar timestamp는 candle open이며 freshness는 다음 closed candle의 expected completion과 허용 delay로 판단한다.
+- ManualKillSwitch는 in-memory 객체다. CLI에는 실행 중 외부에서 토글하는 remote control이 없고 장시간 실행의 즉시 정지는 Ctrl+C다.
+- durable decision idempotency와 pending-order protection은 같은 decision의 중복 submit을 막는다.
 
 ## B. Target architecture / future direction
 
-M4 이후에도 모듈형 모놀리스와 현재 코어 재사용 원칙을 유지한다. 실제 필요가 생길 때 다음 경계를 추가한다.
+M5에서는 Upbit authenticated Broker, 실제 잔고·주문·체결 상태, partial fill, 거래 단위·최소 주문 규칙, 외부 Broker reconciliation과 submit 불확실성 처리를 추가한다. 실제 비용 정책이나 Paper/Live 정책 교체 필요성이 확인될 때만 fee/slippage model port를 추출한다.
 
-| 향후 모듈/경계 | 목표 책임 |
-|---|---|
-| Order / OrderStatus | 제출 이후 주문 lifecycle의 표준 상태 |
-| Broker port | 잔고·주문·체결을 위한 provider-neutral 계약 |
-| PaperBroker | 외부 실주문 없이 Broker 계약을 검증하는 Paper 구현 |
-| Clock | Paper/Live polling과 시간 결정을 명시적으로 주입 |
-| Storage repository | Bar 이외 주문·체결·상태의 영속화와 재시작 복구 |
-| Execution | 제출, idempotency, 상태 동기화, 재시도 정책 조정 |
-| Reconciliation | 저장 상태와 Broker 상태의 불일치 탐지·복구 |
-| Observability | 구조화 로그, correlation ID, 운영 알림과 kill switch |
-
-이 항목들은 현재 구현된 컴포넌트가 아니라 M4 Paper Trading부터 추가할 목표다. 세부 계약은 실제 Paper 요구사항이 생길 때 정의한다.
+향후 multi-account, shared multi-strategy portfolio, 다른 거래소와 주식 지원은 별도 milestone에서 다룬다. 현재 `Instrument`는 `venue`와 `symbol`만 가지며 미래 필드를 미리 추가하지 않는다.
 
 ## 의존성 원칙
 
-- 도메인과 Strategy는 Upbit SDK, SQLite, 자격 증명, 네트워크를 직접 호출하지 않는다.
-- 공급자 응답과 오류는 adapter가 표준 모델과 오류로 변환한다.
-- Strategy, position sizing, Risk는 Backtest/Paper/Live에서 가능한 한 재사용한다.
-- Portfolio의 상태 변화는 Signal이 아니라 Fill을 기준으로 계산한다.
-- 외부 주문은 항상 Risk Manager를 통과해야 한다.
-- 범용 framework나 분산 구조는 실제 필요가 생기기 전에 도입하지 않는다.
-- AI는 향후 선택적 분석 입력이나 리포트로만 추가하며 Risk와 주문 권한을 우회하지 않는다.
-
-## Crypto와 Stock 확장 방향
-
-Upbit 외 거래소와 주식 지원에서도 현재 `Instrument`, `Bar`, Strategy, sizing, Risk 및 분석 로직을 가능한 범위에서 재사용한다. 별도로 필요한 것은 provider/broker adapter와 시장별 calendar, 거래 단위, 수수료·세금·결제, 배당·분할 규칙이다.
-
-현재 `Instrument` 필드는 `venue`와 `symbol`뿐이다. asset class, quote currency, timezone, 내부 ID 같은 추가 정보는 실제 주식·다중시장 요구가 생겼을 때 호환성을 검토하며 확장한다.
+- Strategy는 market adapter, Broker, SQLite를 직접 호출하지 않는다.
+- Position sizing과 Risk는 Backtest와 Paper에서 재사용한다.
+- 상태 변화는 Signal이 아니라 Fill을 기준으로 계산한다.
+- 실제 외부 주문은 항상 Risk를 통과해야 한다.
+- storage와 provider 세부 구현은 application/domain 경계 밖에 둔다.
+- 범용 framework나 분산 구조는 실제 필요 전에 만들지 않는다.
+- AI는 선택적 분석/리포트 계층이며 Risk와 주문 권한을 우회하지 않는다.

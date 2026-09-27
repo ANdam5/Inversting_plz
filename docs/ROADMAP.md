@@ -1,6 +1,6 @@
 # Development Roadmap
 
-각 milestone은 앞 단계의 작은 수직 절편이다. 상세 작업과 완료 여부의 기준은 `TODO.md`다.
+각 milestone은 앞 단계의 작은 수직 절편이다. 상세 작업과 완료 여부는 `TODO.md`가 기준이다.
 
 ## M0 — 최소 기반 (완료)
 
@@ -8,45 +8,25 @@ Python package, pytest, 최소 `Instrument`, UTC timestamp, `Bar`, `MarketDataPr
 
 ## M1 / M1.5 — 시장 데이터와 Backtest dataset (완료)
 
-Upbit 공개 KRW-BTC 일봉을 표준 Bar로 변환해 SQLite에 중복 없이 저장한다. Pagination, 증분 수집, 오류·품질 검사, closed candle 조회와 dataset summary를 제공한다.
+Upbit 공개 일봉을 표준 Bar로 변환해 SQLite에 저장한다. Pagination, 증분 수집, 오류·품질 검사, closed candle 조회와 dataset summary를 제공한다.
 
-## M2 — 최초 Rule-based 판단 흐름 (완료)
+## M2 — Rule-based 판단 흐름 (완료)
 
-SMA crossover Strategy와 Signal, Strategy Profile, OrderIntent, position sizing, BasicRiskManager를 분리해 연결한다. 동일 Strategy를 여러 Instrument와 parameter로 재사용한다.
+SMA crossover Strategy와 Signal, Strategy Profile, OrderIntent, position sizing, BasicRiskManager를 분리해 연결한다.
 
-## M3-A — Minimal deterministic backtest (완료)
+## M3 — Deterministic Backtest / Analysis / Reproducibility (완료)
 
-Historical closed Bar를 시간순으로 재생한다. Signal은 다음 Bar open에서 sizing·Risk를 거쳐 simulated Fill이 되며, target-state와 look-ahead 방지 규칙을 검증한다.
+Historical next-Bar execution, 비용, Portfolio 회계, Equity/Trade Metrics, benchmark를 구현한다. 실행조건 metadata와 deterministic configuration fingerprint로 동일 입력의 재현성을 검증한다.
 
-## M3-B1 — Execution Cost Realism (완료)
+## M4 — Paper Trading (완료)
 
-Deterministic adverse slippage, fee-aware Fill과 cash accounting, 최소 거래금액 및 zero-cost 회귀를 검증한다.
+Order lifecycle, Broker contract, PaperBroker account execution, Clock와 polling scheduler를 구현한다. SQLite에 config·decision·Order·Fill·cursor를 영속화하고 idempotency, restart recovery, reconciliation, stale-data guard, kill switch, structured logging과 Paper CLI를 연결한다.
 
-## M3-B2 — Performance Analysis (완료)
+M4 baseline은 `1 Paper DB = 1 account = 1 session config`인 단일 Instrument session이다. Upbit 공개 데이터와 simulated Fill만 사용하며 실제 거래소 주문은 발생하지 않는다. Paper 비용은 Backtest와 같은 Decimal 계산을 재사용하고, 구현체가 하나뿐인 현재는 fee/slippage model port를 두지 않는다.
 
-Equity Curve, Total Return, CAGR, MDD와 Passive 10%, BTC 100% Buy & Hold 비교 기준을 제공한다.
+## M5 — Upbit Live Trading (다음 단계)
 
-## M3-B3 — Configuration Resolution (완료)
-
-Strategy parameter를 `default < instrument/profile < runtime override` 순서로 병합하고 최종 설정을 검증한다.
-
-## M3-B4 — Portfolio Accounting / Trade Metrics (완료)
-
-평균단가, 실현·미실현 손익, flat→position→flat ClosedTrade ledger와 기본 aggregate Trade Metrics를 계산한다.
-
-## M3-C — Backtest Metadata / Reproducibility (완료)
-
-Dataset·Strategy·sizing·Risk·cost·version 실행조건을 immutable metadata로 기록한다. Canonical metadata JSON의 SHA-256 fingerprint와 동일 입력의 결과 재현성을 검증한다.
-
-## M4 — Paper Trading (진행 중)
-
-Clock, Order/OrderStatus, Broker contract, PaperBroker, Storage repository를 실제 Paper 요구사항에 맞춰 추가한다. Idempotency, 주문·체결 영속화, 재시작 복구, reconciliation, stale data 차단, 로그와 kill switch를 단계적으로 검증한다.
-
-Paper 실행 비용은 Backtest와 같은 provider-neutral Decimal 계산 함수를 재사용한다. 구현체가 하나뿐인 현재 단계에서는 fee/slippage model port를 별도로 만들지 않는다.
-
-## M5 — Upbit Live Trading
-
-Upbit 인증 Broker adapter, 잔고·주문·체결 변환, 거래 단위와 최소 주문 규칙, 안전한 retry와 시작 시 reconciliation을 구현한다. 실제 Upbit 비용 정책과 Paper/Live 정책 교체 요구가 확인될 때만 fee/slippage model port를 추출한다. Dry-run과 명시적 enable을 거쳐 소액·단일 Instrument부터 운영한다.
+Upbit authenticated Broker, 실제 잔고·주문·체결 변환, partial fill/status polling, 거래 단위와 최소 주문 규칙, 안전한 retry 및 외부 exchange reconciliation을 구현한다. 실제 Upbit 비용 정책과 Paper/Live 정책 교체 요구가 확인될 때만 fee/slippage model port를 추출한다. Dry-run과 명시적 enable을 거쳐 소액·단일 Instrument부터 운영한다.
 
 ## M6 이후 — 확장
 
