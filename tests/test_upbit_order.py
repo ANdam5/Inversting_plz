@@ -7,6 +7,7 @@ import pytest
 
 from investing_plz.adapters.upbit_order import (
     UpbitOrderConversionError,
+    UpbitTradeSnapshot,
     UpbitOrderValidationError,
     upbit_order_response_to_snapshot,
     upbit_order_snapshot_to_order,
@@ -35,6 +36,7 @@ def payload(**overrides: object) -> dict[str, object]:
         "locked": "100.05",
         "executed_volume": "0.0",
         "trades_count": 0,
+        "trades": [],
     }
     values.update(overrides)
     return values
@@ -86,8 +88,108 @@ def test_partial_fill_details_remain_in_snapshot_while_order_is_pending() -> Non
     assert snapshot.remaining_volume == Decimal("0.4")
     assert snapshot.executed_volume == Decimal("0.6")
     assert snapshot.trades_count == 2
+    assert tuple(trade.trade_id for trade in snapshot.trades) == ("trade-a", "trade-b")
     assert order.status is OrderStatus.PENDING
     assert order.quantity == Decimal("1.0")
+
+
+def test_upbit_trade_snapshot_parses_exact_decimals_and_normalizes_utc() -> None:
+    raw = json.loads(FIXTURE.read_text(encoding="utf-8"))[2]
+
+    trade = upbit_order_response_to_snapshot(raw).trades[0]
+
+    assert isinstance(trade, UpbitTradeSnapshot)
+    assert trade.trade_id == "trade-a"
+    assert trade.market == "KRW-BTC"
+    assert trade.side == "bid"
+    assert trade.price == Decimal("100.0")
+    assert trade.volume == Decimal("0.4")
+    assert trade.funds == Decimal("40.0")
+    assert trade.created_at == datetime(2026, 9, 27, 1, 1, tzinfo=timezone.utc)
+
+
+def test_trade_decimal_precision_is_preserved() -> None:
+    trade = {
+        "market": "KRW-BTC",
+        "uuid": "trade-precise",
+        "price": "100.1234567890123456789",
+        "volume": "0.1234567890123456789",
+        "funds": "12.34567890123456789",
+        "side": "bid",
+        "created_at": "2026-09-27T10:00:00+09:00",
+    }
+
+    snapshot = upbit_order_response_to_snapshot(
+        payload(trades_count=1, trades=[trade])
+    )
+
+    assert snapshot.trades[0].price == Decimal("100.1234567890123456789")
+    assert snapshot.trades[0].volume == Decimal("0.1234567890123456789")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("uuid", ""),
+        ("market", ""),
+        ("side", "buy"),
+        ("price", 100.0),
+        ("price", "0"),
+        ("volume", "-1"),
+        ("funds", "NaN"),
+        ("created_at", "not-a-time"),
+    ],
+)
+def test_malformed_trade_values_are_rejected(field: str, value: object) -> None:
+    trade = {
+        "market": "KRW-BTC",
+        "uuid": "trade-1",
+        "price": "100",
+        "volume": "1",
+        "funds": "100",
+        "side": "bid",
+        "created_at": "2026-09-27T01:00:00Z",
+    }
+    trade[field] = value
+
+    with pytest.raises(UpbitOrderValidationError):
+        upbit_order_response_to_snapshot(
+            payload(trades_count=1, trades=[trade])
+        )
+
+
+def test_duplicate_trade_uuid_is_rejected() -> None:
+    trade = {
+        "market": "KRW-BTC",
+        "uuid": "trade-1",
+        "price": "100",
+        "volume": "0.5",
+        "funds": "50",
+        "side": "bid",
+        "created_at": "2026-09-27T01:00:00Z",
+    }
+
+    with pytest.raises(UpbitOrderValidationError, match="duplicate trade uuid"):
+        upbit_order_response_to_snapshot(
+            payload(trades_count=2, trades=[trade, dict(trade)])
+        )
+
+
+def test_more_trade_entries_than_trades_count_is_rejected() -> None:
+    trade = {
+        "market": "KRW-BTC",
+        "uuid": "trade-1",
+        "price": "100",
+        "volume": "1",
+        "funds": "100",
+        "side": "bid",
+        "created_at": "2026-09-27T01:00:00Z",
+    }
+
+    with pytest.raises(UpbitOrderValidationError, match="trades_count"):
+        upbit_order_response_to_snapshot(
+            payload(trades_count=0, trades=[trade])
+        )
 
 
 def test_decimal_precision_is_preserved() -> None:

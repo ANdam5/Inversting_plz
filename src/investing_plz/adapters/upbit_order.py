@@ -20,6 +20,31 @@ class UpbitOrderConversionError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class UpbitTradeSnapshot:
+    trade_id: str
+    market: str
+    side: str
+    price: Decimal
+    volume: Decimal
+    funds: Decimal
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        _nonempty_string(self.trade_id, "trade uuid")
+        _nonempty_string(self.market, "trade market")
+        if self.side not in _SIDES:
+            raise ValueError("trade side must be bid or ask")
+        for name in ("price", "volume", "funds"):
+            value = _nonnegative_decimal(getattr(self, name), f"trade {name}")
+            if value == 0:
+                raise ValueError(f"trade {name} must be greater than zero")
+        if not isinstance(self.created_at, datetime) or self.created_at.tzinfo is None:
+            raise ValueError("trade created_at must be timezone-aware")
+        if self.created_at.utcoffset() != timezone.utc.utcoffset(self.created_at):
+            raise ValueError("trade created_at must be normalized to UTC")
+
+
+@dataclass(frozen=True, slots=True)
 class UpbitOrderSnapshot:
     uuid: str
     market: str
@@ -38,6 +63,7 @@ class UpbitOrderSnapshot:
     trades_count: int
     identifier: str | None = None
     time_in_force: str | None = None
+    trades: tuple[UpbitTradeSnapshot, ...] = ()
 
     def __post_init__(self) -> None:
         _nonempty_string(self.uuid, "uuid")
@@ -75,6 +101,15 @@ class UpbitOrderSnapshot:
             value = getattr(self, name)
             if value is not None:
                 _nonempty_string(value, name)
+        if not isinstance(self.trades, tuple) or not all(
+            isinstance(trade, UpbitTradeSnapshot) for trade in self.trades
+        ):
+            raise TypeError("trades must be a tuple of UpbitTradeSnapshot")
+        trade_ids = [trade.trade_id for trade in self.trades]
+        if len(trade_ids) != len(set(trade_ids)):
+            raise ValueError("duplicate trade uuid")
+        if len(self.trades) > self.trades_count:
+            raise ValueError("trades_count is smaller than the trades array")
 
         if self.order_type == "limit" and (
             self.price is None or self.volume is None
@@ -136,6 +171,7 @@ def upbit_order_response_to_snapshot(
             time_in_force=_optional_string(
                 payload.get("time_in_force"), "time_in_force"
             ),
+            trades=_trades(payload.get("trades", ())),
         )
     except (KeyError, TypeError, ValueError, InvalidOperation) as error:
         raise UpbitOrderValidationError(f"invalid Upbit order: {error}") from error
@@ -218,3 +254,29 @@ def _nonnegative_decimal(value: object, field: str) -> Decimal:
     if value < 0:
         raise ValueError(f"{field} must not be negative")
     return value
+
+
+def _trades(value: object) -> tuple[UpbitTradeSnapshot, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise TypeError("trades must be an array")
+    result: list[UpbitTradeSnapshot] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise TypeError("trade must be an object")
+        created_at = datetime.fromisoformat(
+            _nonempty_string(item["created_at"], "trade created_at")
+        )
+        if created_at.tzinfo is None or created_at.utcoffset() is None:
+            raise ValueError("trade created_at must be timezone-aware")
+        result.append(
+            UpbitTradeSnapshot(
+                trade_id=_nonempty_string(item["uuid"], "trade uuid"),
+                market=_nonempty_string(item["market"], "trade market"),
+                side=_nonempty_string(item["side"], "trade side"),
+                price=_decimal_string(item["price"], "trade price"),
+                volume=_decimal_string(item["volume"], "trade volume"),
+                funds=_decimal_string(item["funds"], "trade funds"),
+                created_at=created_at.astimezone(timezone.utc),
+            )
+        )
+    return tuple(result)
