@@ -148,8 +148,8 @@
 
 - [ ] Upbit Live 비용 정책을 확인하고 실제 필요 시 fee model port와 Upbit fee fixture를 추가한다.
 - [ ] Paper/Live 비용 정책의 교체 필요성이 확인되면 slippage model port를 추출한다.
-- [ ] Upbit 인증 서명 생성을 공식 fixture로 테스트한다.
-- [ ] Upbit 잔고 응답을 표준 balance로 변환하고 fixture로 테스트한다.
+- [x] Upbit 인증 서명 생성을 공식 fixture로 테스트한다.
+- [x] Upbit 잔고 응답을 표준 balance로 변환하고 fixture로 테스트한다.
 - [ ] Upbit 주문 응답을 표준 Order로 변환하고 fixture로 테스트한다.
 - [ ] Upbit fill/status polling을 구현하고 부분 체결을 테스트한다.
 - [ ] Upbit tick size 반올림을 구현하고 가격 구간 경계를 테스트한다.
