@@ -153,7 +153,8 @@
 - [x] Upbit 주문 응답을 snapshot으로 파싱하고 정확한 원 수량이 있는 주문만 표준 `Order`로 변환하며 시장가 매수는 명시적으로 거부한다.
 - [x] Upbit order snapshot의 trade/progress 추적과 부분체결 polling core를 fake source로 테스트한다.
 - [x] authenticated Upbit individual-order HTTP 조회 source를 existing tracker에 연결하고 fake HTTP로 검증한다.
-- [ ] Live execution fill/accounting 정책을 확정하고 실제 Fill 영속화를 검증한다.
+- [x] REST trades와 cumulative `paid_fee`를 분리 보존하는 Live accounting update 정책을 구현하고 테스트한다.
+- [ ] Live execution ledger SQLite persistence와 restart idempotency를 구현한다.
 - [ ] Upbit tick size 반올림을 구현하고 가격 구간 경계를 테스트한다.
 - [ ] Upbit 최소 주문 금액 검사를 구현하고 경계값을 테스트한다.
 - [ ] 재시도 정책을 멱등 요청에만 적용하고 timeout/429를 테스트한다.
